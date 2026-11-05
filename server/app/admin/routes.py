@@ -189,9 +189,9 @@ async def retry_generation(generation_id: str, request: Request,
     if denied is not None:
         return denied
     state = request.app.state
-    db.reset_generation_for_retry(state.conn, generation_id)
-    row = db.get_generation(state.conn, generation_id)
-    if row is not None and row["status"] == "pending":
+    # 仅当真正由 failed 重置为 pending 时才启动执行线程，
+    # 否则说明状态已被别的请求处理，直接重定向
+    if db.reset_generation_for_retry(state.conn, generation_id):
         thread = threading.Thread(
             target=tasks_runner.run_generation,
             args=(state.db_path, state.generation, generation_id),

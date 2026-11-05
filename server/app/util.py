@@ -35,8 +35,12 @@ class RateLimiter:
         now = time.monotonic()
         with self._lock:
             window = [t for t in self._hits.get(key, []) if now - t < 60.0]
-            if len(window) >= self._per_minute:
+            if not window:
+                # 窗口已空则顺手删除条目，避免 key 无界增长
+                self._hits.pop(key, None)
+            else:
                 self._hits[key] = window
+            if len(window) >= self._per_minute:
                 return False
             window.append(now)
             self._hits[key] = window

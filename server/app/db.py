@@ -26,6 +26,18 @@ def connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def get_thread_conn(db_path: str) -> sqlite3.Connection:
+    """每线程一个连接（线程本地存储），首次调用时创建。
+
+    避免共享连接跨线程事务交错；init_schema 仍只在启动时跑一次。
+    """
+    conn = getattr(_LOCAL, "conn", None)
+    if conn is None:
+        conn = connect(db_path)
+        _LOCAL.conn = conn
+    return conn
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
@@ -144,13 +156,18 @@ def update_generation(conn, generation_id: str, status: str,
         )
 
 
-def reset_generation_for_retry(conn, generation_id: str) -> None:
+def reset_generation_for_retry(conn, generation_id: str) -> bool:
+    """仅当任务当前为 failed 时重置为 pending；返回是否真正重置。
+
+    返回 False 说明状态已被别的请求处理，调用方不应再启动执行线程。
+    """
     with conn:
-        conn.execute(
+        cur = conn.execute(
             "UPDATE generations SET status='pending', buddy_id=NULL, error_code=NULL,"
             " updated_at=? WHERE generation_id=? AND status='failed'",
             (now_iso(), generation_id),
         )
+        return cur.rowcount > 0
 
 
 def list_generations(conn, limit: int = 100) -> list[sqlite3.Row]:

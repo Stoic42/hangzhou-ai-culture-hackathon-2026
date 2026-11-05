@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 import threading
 
 from fastapi import APIRouter, Request
@@ -50,7 +51,14 @@ async def submit_generation(body: GenerationRequest, request: Request):
 
     generation_id = new_id("gen")
     now = db.now_iso()
-    db.insert_generation(conn, generation_id, body.candidate_id, now)
+    try:
+        db.insert_generation(conn, generation_id, body.candidate_id, now)
+    except sqlite3.IntegrityError:
+        # 并发提交撞上 candidate_id 唯一约束：返回已存在的同一任务
+        existing = db.get_generation_by_candidate(conn, body.candidate_id)
+        if existing is not None:
+            return _task_view(existing)
+        raise
 
     candidate = db.get_candidate(conn, body.candidate_id)
     if candidate is None:

@@ -49,6 +49,17 @@ async def create_candidate(
         return error_response(conn, 429, "rate_limited",
                               "创建过于频繁，请稍后再试", request_id)
 
+    # 预检整体请求体大小（给 multipart 边界等元数据留 64KB 余量），
+    # 超限直接拒绝，避免把超大音频整体读入内存
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > settings.audio_max_bytes + 64 * 1024:
+                return error_response(conn, 400, "invalid_audio",
+                                      "音频为空或超过大小限制", request_id)
+        except ValueError:
+            pass  # 非法 Content-Length 交给后续读取与校验兜底
+
     raw = await audio.read()
     if not raw or len(raw) > settings.audio_max_bytes:
         return error_response(conn, 400, "invalid_audio",
