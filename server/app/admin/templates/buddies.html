@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}搭子库{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>搭子库（{{ items|length }} 条）</h2>
+  <p class="hint">撤回不可恢复，撤回后搭子从公共库消失，仅保留存档标记。</p>
+  {% if items %}
+  <table>
+    <thead>
+      <tr>
+        <th>buddy_id</th><th>名称</th><th>主题标签</th><th>content_hash</th>
+        <th>包大小</th><th>发布时间</th><th>状态</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.buddy_id }}</td>
+        <td>{{ item.name }}</td>
+        <td>{{ item.theme_tags|join("、") }}</td>
+        <td class="mono">{{ item.content_hash }}</td>
+        <td>{{ item.package_size }}</td>
+        <td>{{ item.published_at }}</td>
+        <td>
+          {% if item.withdrawn %}
+          <span class="badge badge-muted">已撤回</span>
+          {% else %}
+          <span class="badge badge-ok">正常</span>
+          {% endif %}
+        </td>
+        <td>
+          {% if not item.withdrawn %}
+          <form method="post" action="/admin/buddies/{{ item.buddy_id }}/withdraw"
+                onsubmit="return confirm('撤回不可恢复，确定要撤回该搭子吗？');">
+            <input type="hidden" name="token" value="{{ token }}">
+            <button type="submit" class="btn-danger">撤回</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">暂无已发布搭子。</p>
+  {% endif %}
+</section>
+{% endblock %}

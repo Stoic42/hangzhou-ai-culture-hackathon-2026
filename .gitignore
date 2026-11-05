@@ -33,3 +33,6 @@ temp/
 **/.build/
 **/dist/
 node_modules/
+
+# Server runtime data (SQLite)
+server/data/

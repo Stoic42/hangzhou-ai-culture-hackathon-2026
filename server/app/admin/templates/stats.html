@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}概览{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>运行概览</h2>
+  <dl class="kv">
+    <dt>Provider</dt><dd>{{ provider }}</dd>
+    <dt>限流阈值（次/分钟/IP）</dt><dd>{{ rate_limit_per_min }}</dd>
+  </dl>
+</section>
+<section class="panel">
+  <h2>统计计数</h2>
+  {% if counters %}
+  <table>
+    <thead><tr><th>计数项</th><th>值</th></tr></thead>
+    <tbody>
+      {% for key, value in counters.items() %}
+      <tr><td>{{ key }}</td><td>{{ value }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">暂无统计数据。</p>
+  {% endif %}
+</section>
+{% endblock %}
