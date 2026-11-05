@@ -1,0 +1,16 @@
+{
+  "validated_on": "2026-11-05",
+  "python": "3.12.10",
+  "system": "Windows",
+  "packages": {
+    "numpy": "2.4.6",
+    "Pillow": "12.3.0",
+    "shapely": "2.2.0",
+    "scipy": "1.17.1",
+    "scikit-image": "0.26.0",
+    "opencv-python-headless": "5.0.0.93",
+    "trimesh": "5.2.0",
+    "mapbox-earcut": "2.1.0",
+    "manifold3d": "3.5.4"
+  }
+}

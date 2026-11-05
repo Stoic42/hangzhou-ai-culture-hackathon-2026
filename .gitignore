@@ -1,0 +1,32 @@
+# Local credentials and private working material
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+private/
+local/
+raw-chat/
+attachments/
+memory/
+*.jsonl
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Local tooling
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+tmp/
+temp/

@@ -1,0 +1,20 @@
+[
+  {
+    "name": "stele_sample_qing",
+    "text": "青",
+    "size_mm": [
+      50.0,
+      50.0,
+      5.2
+    ],
+    "font_size_px": 216,
+    "stroke_target_mm": 1.5,
+    "skeleton_width_p10_mm": 1.5,
+    "counter_count": 0,
+    "preview": "preview/stele_sample_qing.png",
+    "stl": "stl/stele_sample_qing.stl",
+    "watertight": true,
+    "solid_count": 1,
+    "volume_cm3": 10.169
+  }
+]
