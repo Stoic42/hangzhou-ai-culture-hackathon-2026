@@ -12,6 +12,7 @@
 | 日程与官方资料中的待确认项 | [赛程](docs/event/schedule.md) |
 | 现场设备、团队现有板子 | [硬件资源](docs/event/hardware.md) · [现场物料CSV](docs/event/hardware.csv) |
 | 《拓》教学试拓装置 | [独立方案](docs/proposals/tuo.md) · [MVP与拔高分档](docs/proposals/tuo-stages.md) |
+| 《拓章》物品压印候选与眼前操作 | [审阅与下一步](docs/project/tuozhang-next-steps.md) |
 | 《蓝》花版设计／小样控染 | [独立方案](docs/proposals/lan.md) |
 | 《剪》效果图转可制作剪纸 | [独立方案](docs/proposals/jian.md) |
 | 三方案如何比较 | [比较与验证门槛](docs/proposals/comparison.md) |
