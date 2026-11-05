@@ -10,7 +10,7 @@
 ## 文件组织
 
 - 赛事信息：`docs/event/`。
-- 三个方案：`docs/proposals/`，共用方法与先例放 `docs/research/`。
+- 候选方案：`docs/proposals/`，共用方法、痛点调研与先例放 `docs/research/`。
 - 计划、决策、提交材料：`docs/project/`。
 - 可复现代码与模型：`prototypes/`，附运行方法与实验状态。
 
