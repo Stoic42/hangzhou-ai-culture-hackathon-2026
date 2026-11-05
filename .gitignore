@@ -30,3 +30,6 @@ Thumbs.db
 *.log
 tmp/
 temp/
+**/.build/
+**/dist/
+node_modules/

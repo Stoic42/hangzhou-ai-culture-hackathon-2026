@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "buddy_id": "bdy_preset_last_one",
+  "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "content": {
+    "name": "最后一条",
+    "personality": "害怕今天结束，总想再留用户一会儿",
+    "gameplay_summary": "它会不断追加小任务；玩家需要长按拒绝，拒绝3次即可放下手机",
+    "theme_tags": ["熬夜"]
+  },
+  "avatar": {
+    "face": "round",
+    "eyes": "sleepy",
+    "mouth": "small",
+    "palette": ["#18243A", "#FFD166"],
+    "motion_style": "drowsy"
+  },
+  "game": {
+    "duration_sec": 75,
+    "initial_node": "invite",
+    "variables": [{ "name": "refusals", "type": "int", "initial": 0 }],
+    "nodes": [
+      {
+        "id": "invite",
+        "title": "最后一条",
+        "instruction": "它又发来一条；点按接受，长按拒绝",
+        "on_enter": [
+        { "op": "avatar.expression", "value": "pleading" },
+        { "op": "audio.play", "resource_id": "feedback" }
+      ],
+        "transitions": [
+          {
+            "event": "touch.tap",
+            "to": "appended",
+            "actions": [{ "op": "avatar.expression", "value": "happy" }]
+          },
+          {
+            "event": "touch.long_press",
+            "to": "refused",
+            "actions": [
+              { "op": "var.increment", "name": "refusals", "value": 1 },
+              { "op": "avatar.expression", "value": "anxious" }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "appended",
+        "title": "再加一条",
+        "instruction": "任务又多了；点按接受，长按拒绝",
+        "on_enter": [{ "op": "avatar.motion", "value": "bounce" }],
+        "transitions": [
+          {
+            "event": "touch.tap",
+            "to": "invite",
+            "actions": [{ "op": "avatar.expression", "value": "smug" }]
+          },
+          {
+            "event": "touch.long_press",
+            "to": "refused",
+            "actions": [{ "op": "var.increment", "name": "refusals", "value": 1 }]
+          }
+        ]
+      },
+      {
+        "id": "refused",
+        "title": "再忍一下",
+        "instruction": "已拒绝；继续长按拒绝它，或等它把你留下",
+        "on_enter": [{ "op": "avatar.expression", "value": "angry" }],
+        "transitions": [
+          {
+            "event": "touch.long_press",
+            "condition": { "left": { "var": "refusals" }, "op": "gte", "right": 2 },
+            "to": "escaped_node",
+            "actions": [{ "op": "game.end", "outcome": "escaped" }]
+          },
+          {
+            "event": "touch.long_press",
+            "to": "refused",
+            "actions": [{ "op": "var.increment", "name": "refusals", "value": 1 }]
+          }
+        ]
+      },
+      {
+        "id": "escaped_node",
+        "title": "破解成功",
+        "instruction": "你放下了手机",
+        "on_enter": [{ "op": "avatar.expression", "value": "neutral" }],
+        "transitions": []
+      },
+      {
+        "id": "carried_node",
+        "title": "被搭子带跑",
+        "instruction": "你又熬了一整夜",
+        "on_enter": [
+        { "op": "avatar.expression", "value": "sleepy" },
+        { "op": "game.end", "outcome": "carried_away" }
+      ],
+        "transitions": []
+      }
+    ]
+  },
+  "resources": [
+    {
+      "resource_id": "feedback",
+      "kind": "audio",
+      "url": "builtin://feedback",
+      "sha256": "a1c99febd637eb63b9d34580eff2147ed37b6ac1641f264519b2f0cb0c8cef90",
+      "size": 3200
+    }
+  ]
+}

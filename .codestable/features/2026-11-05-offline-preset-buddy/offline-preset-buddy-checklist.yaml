@@ -4,22 +4,23 @@ created: 2026-11-05
 steps:
   - action: 真机编排骨架：准备TuyaOpen工具链并验证显示、触摸、音频、烧录与日志
     exit_signal: 通过实际烧录口完成烧录且实际日志口有启动日志，真机触摸和测试音均可用
-    status: pending
+    status: done
   - action: 共享契约：实现规则包v1校验器与三只玩法不同的内置预设
     exit_signal: 合法预设通过且未知op或枚举、缺失节点、无双结局、非法时长负例均失败
-    status: pending
+    status: done
   - action: 运行时骨架：实现主界面、详情、生成页离线状态并加载内置规则包创建GameSession
     exit_signal: 三只预设均能从主界面进入初始节点，长按看详情，生成页可返回且详情返回保留选中项
-    status: pending
+    status: done
   - action: 游戏状态机：实现触摸迁移、变量、倒计时、双结局与重开
     exit_signal: 三只预设均可到达两种结局且重开后变量和倒计时复位
-    status: pending
+    status: done
   - action: 参数化表演：接入节点文本、形象、动作和本地音频反馈
     exit_signal: 三只预设的外观、文本与反馈在真机可区分
-    status: pending
+    status: done
   - action: 真机收口：执行双结局脚本、断网连续重开、非法包和范围回归
     exit_signal: 每只双结局各1次且另做不少于3局连续重开，构建与校验命令重跑通过
     status: pending
+
 
 checks:
   - item: 规则包v1使用白名单事件、动作、完整枚举与60—90秒时长

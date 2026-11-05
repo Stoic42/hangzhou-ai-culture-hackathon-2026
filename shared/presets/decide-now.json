@@ -1,0 +1,114 @@
+{
+  "schema_version": 1,
+  "buddy_id": "bdy_preset_decide_now",
+  "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "content": {
+    "name": "快选吧",
+    "personality": "摇摆不定，把每个选择都变成拉锯战",
+    "gameplay_summary": "点按在A/B之间切换；滑动锁定选择，锁定2次就能下定决心",
+    "theme_tags": ["选择困难"]
+  },
+  "avatar": {
+    "face": "bean",
+    "eyes": "side",
+    "mouth": "flat",
+    "palette": ["#5E548E", "#F7C59F"],
+    "motion_style": "jittery"
+  },
+  "game": {
+    "duration_sec": 65,
+    "initial_node": "offer_a",
+    "variables": [{ "name": "locks", "type": "int", "initial": 0 }],
+    "nodes": [
+      {
+        "id": "offer_a",
+        "title": "选A还是B",
+        "instruction": "点按看看B；滑动锁定A",
+        "on_enter": [
+        { "op": "avatar.expression", "value": "neutral" },
+        { "op": "audio.play", "resource_id": "feedback" }
+      ],
+        "transitions": [
+          {
+            "event": "touch.tap",
+            "to": "offer_b",
+            "actions": [{ "op": "avatar.expression", "value": "anxious" }]
+          },
+          {
+            "event": "touch.swipe",
+            "to": "locked",
+            "actions": [{ "op": "var.increment", "name": "locks", "value": 1 }]
+          }
+        ]
+      },
+      {
+        "id": "offer_b",
+        "title": "选B还是A",
+        "instruction": "点按回到A；滑动锁定B",
+        "on_enter": [{ "op": "avatar.motion", "value": "shake" }],
+        "transitions": [
+          {
+            "event": "touch.tap",
+            "to": "offer_a",
+            "actions": [{ "op": "avatar.expression", "value": "sleepy" }]
+          },
+          {
+            "event": "touch.swipe",
+            "to": "locked",
+            "actions": [{ "op": "var.increment", "name": "locks", "value": 1 }]
+          }
+        ]
+      },
+      {
+        "id": "locked",
+        "title": "已锁定一次",
+        "instruction": "点按反悔；滑动再锁定一次就定了",
+        "on_enter": [{ "op": "avatar.expression", "value": "pleading" }],
+        "transitions": [
+          {
+            "event": "touch.swipe",
+            "condition": { "left": { "var": "locks" }, "op": "gte", "right": 1 },
+            "to": "escaped_node",
+            "actions": [{ "op": "game.end", "outcome": "escaped" }]
+          },
+          {
+            "event": "touch.swipe",
+            "to": "locked",
+            "actions": [{ "op": "var.increment", "name": "locks", "value": 1 }]
+          },
+          {
+            "event": "touch.tap",
+            "to": "offer_a",
+            "actions": [{ "op": "avatar.expression", "value": "smug" }]
+          }
+        ]
+      },
+      {
+        "id": "escaped_node",
+        "title": "破解成功",
+        "instruction": "你终于定了",
+        "on_enter": [{ "op": "avatar.expression", "value": "happy" }],
+        "transitions": []
+      },
+      {
+        "id": "carried_node",
+        "title": "被搭子带跑",
+        "instruction": "你什么都没选成",
+        "on_enter": [
+        { "op": "avatar.expression", "value": "anxious" },
+        { "op": "game.end", "outcome": "carried_away" }
+      ],
+        "transitions": []
+      }
+    ]
+  },
+  "resources": [
+    {
+      "resource_id": "feedback",
+      "kind": "audio",
+      "url": "builtin://feedback",
+      "sha256": "a1c99febd637eb63b9d34580eff2147ed37b6ac1641f264519b2f0cb0c8cef90",
+      "size": 3200
+    }
+  ]
+}
