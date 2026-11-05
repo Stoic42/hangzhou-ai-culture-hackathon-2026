@@ -9,6 +9,7 @@
 - [活动详情](https://ai.builderlab.cn/activities/5037d91b-beb0-4a3c-9c5a-23a2ba35a58b)：公开活动入口。
 - [Tuya T5AI-Board](https://www.tuyaopen.ai/zh/docs/hardware/tuya-t5/t5-ai-board/overview-t5-ai-board)：板卡与可选配件；具体领取套装以实物为准。
 - [Tuya语音应用示例](https://docs.tuyaopen.ai/zh/docs/hardware/tuya-t5/develop-with-Arduino/Application)：语音与工具调用开发入口。
+- [Raspberry Pi 5官方产品资料](https://www.raspberrypi.com/products/raspberry-pi-5/)：16GB型号、相机与USB接口、供电和散热说明；不代表已完成模型性能测试。
 
 ## 图片转制作图纸
 
@@ -25,6 +26,7 @@
 
 ## 文化与工艺
 
+- [国家古籍保护中心传拓示范活动](https://www.nlc.cn/pcab/zx/xw/20210429_201287.shtml)：分别列出上纸、刷纸、上墨、匀墨、起纸等操作，提醒原型不要把单一动作当成完整工艺。
 - [UNESCO中国剪纸](https://ich.unesco.org/en/RL/chinese-paper-cut-00219)：剪纸作为装饰、节庆、祈愿及情感表达的文化背景。
 - [苍南《蓝夹缬》工艺资料](https://cnzx.cncn.gov.cn/art/2023/7/25/art_1302240_58827700.html)：成对花板夹布与相关工艺流程。
 - [良渚博物院蓝夹缬体验](https://www.lzmuseum.cn/LiangBoXinWen/2023644167648.html)：使用已准备材料开展体验的案例。
