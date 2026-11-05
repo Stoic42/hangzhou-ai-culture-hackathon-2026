@@ -38,6 +38,14 @@ def get_thread_conn(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def close_thread_conn() -> None:
+    """测试钩子：关闭并清理当前线程的连接，避免跨测试复用指向旧库的连接。"""
+    conn = getattr(_LOCAL, "conn", None)
+    if conn is not None:
+        conn.close()
+        del _LOCAL.conn
+
+
 def init_schema(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """

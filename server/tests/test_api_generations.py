@@ -69,22 +69,39 @@ def test_generation_failure_not_published(client, monkeypatch):
     """生成失败注入 → 任务 failed/generation_failed，公共库不出现 buddy。"""
     from server.app.providers.stub import StubGeneration
 
-    original = StubGeneration.make_game_and_avatar
-
     def _boom(self, content):
         raise GenerationFailed("注入：生成失败")
 
+    # monkeypatch 会在测试结束时自动还原，无需手动恢复
     monkeypatch.setattr(StubGeneration, "make_game_and_avatar", _boom)
-    try:
-        candidate = create_candidate(client)
-        task = submit_generation(client, candidate["candidate_id"])
-        done = wait_generation(client, task["generation_id"])
-        assert done["status"] == "failed"
-        assert done["error_code"] == "generation_failed"
-        listing = client.get("/api/v1/buddies").json()
-        assert listing["items"] == []
-    finally:
-        monkeypatch.setattr(StubGeneration, "make_game_and_avatar", original)
+    candidate = create_candidate(client)
+    task = submit_generation(client, candidate["candidate_id"])
+    done = wait_generation(client, task["generation_id"])
+    assert done["status"] == "failed"
+    assert done["error_code"] == "generation_failed"
+    listing = client.get("/api/v1/buddies").json()
+    assert listing["items"] == []
+
+
+def test_expired_candidate_fails_in_runner(client):
+    """候选在提交后、执行前过期：tasks_runner 过期分支 → failed/candidate_expired。
+
+    区别于“候选不存在”用例：候选仍在库中但 expires_at 已过去，
+    覆盖 runner 内部的时间戳检查分支。
+    """
+    candidate = create_candidate(client)
+    conn = client.app.state.conn
+    with conn:
+        conn.execute(
+            "UPDATE candidates SET expires_at = ? WHERE candidate_id = ?",
+            ("2000-01-01T00:00:00Z", candidate["candidate_id"]),
+        )
+    task = submit_generation(client, candidate["candidate_id"])
+    # 不断言返回时是否 pending：执行线程可能已先跑完
+    done = wait_generation(client, task["generation_id"])
+    assert done["status"] == "failed"
+    assert done["error_code"] == "candidate_expired"
+    assert done["buddy_id"] is None
 
 
 def test_concurrent_submits_return_same_task(client):

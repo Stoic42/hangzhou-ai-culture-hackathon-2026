@@ -12,6 +12,25 @@ from fastapi.testclient import TestClient
 from server.app import config, db as db_module
 
 
+def _make_client(monkeypatch, tmp_path, **env) -> TestClient:
+    """按 env 覆盖环境变量后重建应用，返回包裹好的 TestClient。
+
+    yield 前由 fixture 负责设置；连接与配置缓存的清理在各 fixture 收尾统一做。
+    """
+    monkeypatch.setenv("SERVER_DB_PATH", str(tmp_path / "server.db"))
+    monkeypatch.setenv("SERVER_PROVIDER", "stub")
+    monkeypatch.setenv("SERVER_ADMIN_TOKEN", "test-token")
+    monkeypatch.delenv("SERVER_RATE_LIMIT_PER_MIN", raising=False)
+    monkeypatch.delenv("SERVER_BASE_URL", raising=False)
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    config.reset_settings_cache()
+
+    from server.app.main import create_app
+
+    return TestClient(create_app())
+
+
 def make_wav(seconds: float = 1.0, *, seed: int | None = None) -> bytes:
     """生成 16kHz 单声道 16bit WAV 字节；seed 非 None 时填充确定性噪声以改变识别内容。"""
     rate = 16000
@@ -36,68 +55,32 @@ def make_wav(seconds: float = 1.0, *, seed: int | None = None) -> bytes:
     return buf.getvalue()
 
 
-def _close_thread_conn() -> None:
-    """关闭并清掉线程本地连接，避免跨测试复用指向旧库的连接。"""
-    conn = getattr(db_module._LOCAL, "conn", None)  # noqa: SLF001 — 测试专用清理
-    if conn is not None:
-        conn.close()
-        del db_module._LOCAL.conn  # noqa: SLF001
-
-
 @pytest.fixture()
 def client(monkeypatch, tmp_path):
     """默认配置下的测试客户端：stub Provider、独立库、后台口令 test-token。"""
-    monkeypatch.setenv("SERVER_DB_PATH", str(tmp_path / "server.db"))
-    monkeypatch.setenv("SERVER_PROVIDER", "stub")
-    monkeypatch.setenv("SERVER_ADMIN_TOKEN", "test-token")
-    monkeypatch.delenv("SERVER_RATE_LIMIT_PER_MIN", raising=False)
-    monkeypatch.delenv("SERVER_BASE_URL", raising=False)
-    config.reset_settings_cache()
-
-    from server.app.main import create_app
-
-    app = create_app()
-    with TestClient(app) as test_client:
+    with _make_client(monkeypatch, tmp_path) as test_client:
         yield test_client
-    _close_thread_conn()
+    db_module.close_thread_conn()
     config.reset_settings_cache()
 
 
 @pytest.fixture()
 def limited_client(monkeypatch, tmp_path):
     """限流阈值压到 3 次/分钟的客户端。"""
-    monkeypatch.setenv("SERVER_DB_PATH", str(tmp_path / "server.db"))
-    monkeypatch.setenv("SERVER_PROVIDER", "stub")
-    monkeypatch.setenv("SERVER_ADMIN_TOKEN", "test-token")
-    monkeypatch.setenv("SERVER_RATE_LIMIT_PER_MIN", "3")
-    monkeypatch.delenv("SERVER_BASE_URL", raising=False)
-    config.reset_settings_cache()
-
-    from server.app.main import create_app
-
-    app = create_app()
-    with TestClient(app) as test_client:
+    with _make_client(monkeypatch, tmp_path,
+                      SERVER_RATE_LIMIT_PER_MIN="3") as test_client:
         yield test_client
-    _close_thread_conn()
+    db_module.close_thread_conn()
     config.reset_settings_cache()
 
 
 @pytest.fixture()
 def no_token_client(monkeypatch, tmp_path):
     """后台口令为空串（未配置）的客户端。"""
-    monkeypatch.setenv("SERVER_DB_PATH", str(tmp_path / "server.db"))
-    monkeypatch.setenv("SERVER_PROVIDER", "stub")
-    monkeypatch.setenv("SERVER_ADMIN_TOKEN", "")
-    monkeypatch.delenv("SERVER_RATE_LIMIT_PER_MIN", raising=False)
-    monkeypatch.delenv("SERVER_BASE_URL", raising=False)
-    config.reset_settings_cache()
-
-    from server.app.main import create_app
-
-    app = create_app()
-    with TestClient(app) as test_client:
+    with _make_client(monkeypatch, tmp_path,
+                      SERVER_ADMIN_TOKEN="") as test_client:
         yield test_client
-    _close_thread_conn()
+    db_module.close_thread_conn()
     config.reset_settings_cache()
 
 

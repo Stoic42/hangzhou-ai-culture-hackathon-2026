@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from server.app.providers.base import (  # noqa: F401 — 注入异常类型
-    GenerationUnavailable, SpeechUnrecognized,
+    ContentNotSupported, GenerationUnavailable, SpeechUnrecognized,
 )
 
 from .conftest import make_wav, upload_candidate
@@ -85,6 +85,18 @@ def test_unavailable_provider_yields_503(client, monkeypatch):
     monkeypatch.setattr(client.app.state, "asr", _DownASR())
     _assert_error_shape(upload_candidate(client, make_wav(1.0)), 503,
                         "generation_unavailable")
+
+
+def test_content_not_supported_yields_422(client, monkeypatch):
+    """候选生成阶段判定话题不支持 → 422 content_not_supported。"""
+
+    class _PickyGeneration:
+        def make_candidate_content(self, text: str) -> dict:
+            raise ContentNotSupported("注入：话题不支持")
+
+    monkeypatch.setattr(client.app.state, "generation", _PickyGeneration())
+    _assert_error_shape(upload_candidate(client, make_wav(1.0)), 422,
+                        "content_not_supported")
 
 
 def test_rate_limit_exceeded(limited_client):
