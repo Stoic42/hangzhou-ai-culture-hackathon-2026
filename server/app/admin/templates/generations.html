@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}生成任务{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>生成任务（{{ items|length }} 条）</h2>
+  {% if items %}
+  <table>
+    <thead>
+      <tr>
+        <th>generation_id</th><th>candidate_id</th><th>状态</th>
+        <th>buddy_id</th><th>错误码</th><th>更新时间</th><th>操作</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.generation_id }}</td>
+        <td class="mono">{{ item.candidate_id }}</td>
+        <td>
+          {% if item.status == "succeeded" %}
+          <span class="badge badge-ok">成功</span>
+          {% elif item.status == "failed" %}
+          <span class="badge badge-danger">失败</span>
+          {% else %}
+          <span class="badge badge-pending">进行中</span>
+          {% endif %}
+        </td>
+        <td class="mono">{{ item.buddy_id or "—" }}</td>
+        <td class="mono">{{ item.error_code or "—" }}</td>
+        <td>{{ item.updated_at }}</td>
+        <td>
+          {% if item.status == "failed" %}
+          <form method="post" action="/admin/generations/{{ item.generation_id }}/retry">
+            <input type="hidden" name="token" value="{{ token }}">
+            <button type="submit">重试</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">暂无生成任务。</p>
+  {% endif %}
+</section>
+{% endblock %}

@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}管理后台{% endblock %} · 当代妖怪收容所</title>
+  <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+<header class="topbar">
+  <h1>当代妖怪收容所 · 管理后台</h1>
+  <nav>
+    <a href="/admin">概览</a>
+    <a href="/admin/buddies">搭子库</a>
+    <a href="/admin/generations">生成任务</a>
+    <a href="/admin/candidates">候选</a>
+  </nav>
+</header>
+<main>
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

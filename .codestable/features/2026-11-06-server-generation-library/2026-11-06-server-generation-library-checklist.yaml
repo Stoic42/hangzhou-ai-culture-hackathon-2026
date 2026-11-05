@@ -1,0 +1,69 @@
+feature: 2026-11-06-server-generation-library
+created: 2026-11-06
+
+steps:
+  - action: 装配应用骨架：配置、SQLite 三张表 + 计数器、线程本地连接、统一错误响应与限流器
+    exit_signal: create_app 可重复构建，环境变量全量覆盖配置，凭证不进代码
+    status: done
+  - action: 生成服务契约4.1：WAV（≤30s、≤2MB）上传→ASR→候选四字段入库，音频即弃、识别文本私有
+    exit_signal: 合法 WAV 返回 201；invalid_audio/speech_unrecognized/content_not_supported/503/429 负例各命中一次
+    status: done
+  - action: 生成服务契约4.2：幂等提交生成任务，后台线程生成→校验→发布→状态收敛
+    exit_signal: 重复提交返回同一任务；succeeded 时 buddy 已可读；过期/失败候选不入库且状态不悬挂
+    status: done
+  - action: 公共搭子库契约4.3：cursor 稳定分页列表、详情、manifest 下载与内部撤回
+    exit_signal: 分页顺序稳定；撤回后列表清空、详情/manifest 返回 410；公开字段不泄露隐私
+    status: done
+  - action: 管理后台：口令认证四页面（统计/候选/任务/搭子）+ 撤回与失败重试
+    exit_signal: 未带口令显示登录页、未配置显示提示页；登录后可撤回与重试，页面不含识别原文
+    status: done
+  - action: 审查修复与测试收口：两轮独立审查修复并发/悬挂/过期可生成/幂等竞态/重试双开，补齐用例并跑通全量
+    exit_signal: 43 个 pytest 全绿；uvicorn 真实启动冒烟通过端到端闭环
+    status: done
+
+checks:
+  - item: 候选响应只含四字段与有效期，识别文本私有且随过期删除，原始音频不落盘
+    source: 契约4.1 隐私约束
+    status: done
+  - item: WAV 大小与时长约束、音频即弃、空音频拒绝
+    source: 契约4.1
+    status: done
+  - item: 同一 candidate_id 重复提交返回同一任务，succeeded 返回同一 buddy_id
+    source: 契约4.2 幂等
+    status: done
+  - item: 任务 succeeded 时 buddy 已从公共库可读；失败不入库；异常必收敛不悬挂
+    source: 契约4.2
+    status: done
+  - item: 发布前校验 = shared 校验器 + 设备硬上限收紧
+    source: validate.py
+    status: done
+  - item: 列表 published_at 降序 + buddy_id 降序稳定分页，cursor 绑定该顺序
+    source: 契约4.3
+    status: done
+  - item: 撤回仅内部操作，公开 API 对已撤回搭子返回 410，不删除设备缓存
+    source: 契约4.3
+    status: done
+  - item: 后台口令认证（空则提示未配置），页面不含识别原文
+    source: 后台设计
+    status: done
+  - item: 限流只作用于候选与生成接口；并发提交同一候选不产生重复任务
+    source: 契约4.1/4.2
+    status: done
+
+dod:
+  commands:
+    - id: CMD-001
+      command: py -3.12 -m pip install -r server/requirements.txt
+      core: true
+      failure_handling: fix-or-block
+    - id: CMD-002
+      command: py -3.12 -m pytest server/tests -v
+      core: true
+      failure_handling: fix-or-block
+    - id: CMD-003
+      command: py -3.12 -m uvicorn server.app.main:app（仓库根目录，真实启动后跑上传→生成→列表→撤回→410 冒烟）
+      core: true
+      failure_handling: fix-or-block
+  evidence_required: [command_output, diff_summary]
+  cleanliness:
+    debug_output: allowed-for-state-and-errors

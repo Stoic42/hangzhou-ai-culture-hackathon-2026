@@ -32,3 +32,7 @@
 ## 验证与记录
 
 每条子feature启动时使用 `cs-feat-design` 读取完整roadmap第4节接口契约，完成后留下构建/测试命令、API响应或真机视频，并由验收流程回写items.yaml。凭证不得进入公开仓库。
+
+### 服务器侧进展（11-06）
+
+服务器侧（契约 4.1 语音候选、4.2 异步生成、4.3 公共搭子库 + 口令保护的管理后台）已于 11-06 完成：`server/` 下 43 个 pytest 全绿，并经 uvicorn 真实启动冒烟（上传 WAV→候选→生成→公共库→后台撤回→410）。默认 stub Provider 为确定性假数据，可随时经 `SERVER_PROVIDER=remote` 环境变量切换真实 ASR/LLM。剩余依赖为设备侧基线（音频编码确认）与真机联调，详见 `server/README.md` 与 `.codestable/features/2026-11-06-server-generation-library/`。

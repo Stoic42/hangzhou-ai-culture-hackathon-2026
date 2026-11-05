@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}候选{% endblock %}
+{% block content %}
+<section class="panel">
+  <h2>候选（{{ items|length }} 条）</h2>
+  <p class="hint">按隐私约束，候选的识别原文不在本页面展示，且随候选过期删除。</p>
+  {% if items %}
+  <table>
+    <thead>
+      <tr>
+        <th>candidate_id</th><th>名称</th><th>主题标签</th>
+        <th>创建时间</th><th>过期时间</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td class="mono">{{ item.candidate_id }}</td>
+        <td>{{ item.name }}</td>
+        <td>{{ item.theme_tags|join("、") }}</td>
+        <td>{{ item.created_at }}</td>
+        <td>{{ item.expires_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">暂无候选。</p>
+  {% endif %}
+</section>
+{% endblock %}
