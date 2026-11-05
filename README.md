@@ -17,6 +17,7 @@
 | 三方案如何比较 | [比较与验证门槛](docs/proposals/comparison.md) |
 | AI效果图如何转换为制作图纸 | [技术路线](docs/research/image-to-craft.md) |
 | 从兴趣领域转向真实参与场景 | [痛点调研与新增候选](docs/research/pain-points-and-opportunities-2026-11-05.md) |
+| 已借到T5核心板、USB相机与1.54寸彩墨屏后能怎么玩 | [小图鉴、捕词与共创徽章](docs/research/t5-camera-epaper-playgrounds.md) |
 | 产品、论文和文化资料 | [参考链接](docs/research/references.md) |
 | 已确定什么、还没确定什么 | [讨论记录](docs/project/decisions.md) |
 | 剩余开发步骤与提交清单 | [开发计划](docs/project/roadmap.md) · [提交材料](docs/project/submission.md) |

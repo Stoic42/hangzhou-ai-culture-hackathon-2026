@@ -34,6 +34,19 @@
 
 ## 团队现有设备
 
+### 2026-11-05已借到的现场设备
+
+由团队现场确认，区别于上表全场库存：
+
+- **涂鸦T5核心板×1**：不是此前泛称的T5-AI大开发板；具体版本以实物为准。
+- **USB摄像头×1**：团队进一步确认USB插头；对应清单的摄像头项，兼容格式、分辨率及接入方式尚未实测。
+- **清单中的1.54寸彩色墨水屏×1**：团队拿到该尺寸最后一块；屏幕控制器、色数、驱动板和刷新参数仍未核对。
+- 清单中单列的**E6彩色墨水屏没有借到**。不能将它列作本队可用设备；现场剩余库存是当时信息，不更新为整场长期库存。
+
+本轮确认了领用，不代表已完成上电、刷写、相机采集或屏幕显示。候选玩法见[小图鉴、捕词与共创徽章](../research/t5-camera-epaper-playgrounds.md)。
+
+### 原有自带设备
+
 - Raspberry Pi 5 **16GB**：2026-11-05由团队确认持有；候选职责为相机采集、视觉处理、本地交互与任务调度，配套供电/散热/存储及实机状态待检查。
 - M5Stack StackChan：具体主机、扩展和已启用能力以实机检查为准。
 - Raspberry Pi Pico系列Wi-Fi板：讨论中称“Pico W2”，准确丝印型号需核对。
@@ -41,6 +54,8 @@
 - 个人电脑，可承担图像处理、生成模型API和开发工具。
 
 涂鸦板的麦克风、屏幕、摄像头与外设接口不能从系列名推定全部随套件附送。可先查[T5AI-Board官方说明](https://www.tuyaopen.ai/zh/docs/hardware/tuya-t5/t5-ai-board/overview-t5-ai-board)与[语音应用示例](https://docs.tuyaopen.ai/zh/docs/hardware/tuya-t5/develop-with-Arduino/Application)。
+
+本次借到核心板后，优先对照[T5AI-Core官方说明](https://docs.tuyaopen.ai/zh/docs/hardware/tuya-t5/t5-ai-core/overview-t5-ai-core)，不要直接套用大开发板的接口与配置。
 
 ## 最小接线与工艺验证
 
