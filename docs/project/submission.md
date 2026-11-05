@@ -1,4 +1,4 @@
-# 提交与路演材料
+# 《当代妖怪收容所》提交与路演材料
 
 来源：[赛事指南](https://ai-gongfang.feishu.cn/wiki/XBWpwiOC0i9SXbk1QRbcNePenTg)，2026-11-05核对。提交时刻、表单与文件限制待现场确认。
 

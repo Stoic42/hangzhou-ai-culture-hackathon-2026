@@ -34,6 +34,7 @@
 
 ## 团队现有设备
 
+- 涂鸦T5-E1-Touch-AMOLED-1.75-G×3：产品页确认板载麦克风、2.4GHz Wi‑Fi、蓝牙5.4/BLE、466×466电容触摸屏、8MB Flash、16MB PSRAM及Micro SD卡槽；扬声器通过MX1.25接口外接，该版本配置清单含8Ω 2W喇叭。麦克风拾音距离、降噪与实际录音质量仍需实机验证，不能据此推定可本地运行生成式AI或离线语音识别。来源：[微雪产品页](https://www.waveshare.net/shop/T5-E1-Touch-AMOLED-1.75-G.htm)，核对日期2026-11-05。
 - M5Stack StackChan：具体主机、扩展和已启用能力以实机检查为准。
 - Raspberry Pi Pico系列Wi-Fi板：讨论中称“Pico W2”，准确丝印型号需核对。
 - micro:bit：**1块**，不规划多块阵列。

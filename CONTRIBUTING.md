@@ -10,9 +10,10 @@
 ## 文件组织
 
 - 赛事信息：`docs/event/`。
-- 三个方案：`docs/proposals/`，共用方法与先例放 `docs/research/`。
-- 计划、决策、提交材料：`docs/project/`。
-- 可复现代码与模型：`prototypes/`，附运行方法与实验状态。
+- 当前作品《当代妖怪收容所》的计划、决策和提交材料：`docs/project/`。
+- 领域术语、架构ADR与子feature状态：`.codestable/requirements/`和`.codestable/roadmap/`。
+- 当前搭子代码按roadmap分为`device/`、`server/`和`shared/`，只在对应feature启动后创建。
+- 暂无实施计划的《拓》《蓝》《剪》及其原型：`archive/initial-directions/`，不作为当前开发入口。
 
 ## 公开内容
 

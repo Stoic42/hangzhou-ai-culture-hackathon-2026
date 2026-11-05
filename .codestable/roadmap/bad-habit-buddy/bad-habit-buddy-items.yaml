@@ -1,0 +1,46 @@
+roadmap: bad-habit-buddy
+created: 2026-11-05
+
+items:
+  - slug: offline-preset-buddy
+    description: 建立T5工程基线、规则包v1执行器与三只玩法不同的预设搭子，断网可玩出两种结局
+    depends_on: []
+    status: in-progress
+    feature: 2026-11-05-offline-preset-buddy
+    minimal_loop: true
+    notes: 先做SDK/触摸/音频spike；每只预设断网连续3局且双结局各至少1次，重开重置，构建与规则校验命令可运行。
+  - slug: voice-candidate-creation
+    description: 建立生成服务测试基线，并让用户按住T5说话获得候选搭子的名称、性格、玩法简介与主题标签
+    depends_on: [offline-preset-buddy]
+    status: planned
+    feature: null
+    minimal_loop: false
+    notes: 3句不同输入分别返回候选；无效语音、服务503和生成429各注入1次且本地入口可用；生成限流不影响公共库浏览/下载。
+  - slug: confirmed-buddy-generation
+    description: 确认候选后异步生成并校验可执行规则包，通过最小发布通路写入公共库，保持已确认内容逐字不变
+    depends_on: [offline-preset-buddy, voice-candidate-creation]
+    status: planned
+    feature: null
+    minimal_loop: false
+    notes: 至少2只自定义搭子通过内容diff、双结局校验并各真机运行1局；任务成功时可按ID读取，失败不入库；完整列表、分页与撤回归后续条目。
+  - slug: public-buddy-library
+    description: 将生成成功的搭子不可变发布到无登录公共库并提供稳定分页、详情和资源下载
+    depends_on: [confirmed-buddy-generation]
+    status: planned
+    feature: null
+    minimal_loop: false
+    notes: API测试覆盖分页、公开字段、不可变、内部运维撤回与404/410；无公开撤回API，不得包含创造者原话、识别文本或录音。
+  - slug: device-library-cache
+    description: T5浏览公共库、原子下载完整搭子并离线切换已有缓存
+    depends_on: [offline-preset-buddy, public-buddy-library]
+    status: planned
+    feature: null
+    minimal_loop: false
+    notes: 下载至少2只并各断网玩1局；坏包、下载中断、存储不足各注入1次且既有缓存仍可玩。
+  - slug: three-device-demo-hardening
+    description: 用三台独立T5完成生成、公共库获取和离线预设演示，并收口主要错误与回归
+    depends_on: [device-library-cache]
+    status: planned
+    feature: null
+    minimal_loop: false
+    notes: A生成、B下载后断网游玩、C离线预设各1次；断网、坏包、存储写满、服务503各注入1次；不增加实时联机。
