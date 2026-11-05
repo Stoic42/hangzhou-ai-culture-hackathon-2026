@@ -88,11 +88,19 @@ def test_generation_failure_not_published(client, monkeypatch):
 
 
 def test_concurrent_submits_return_same_task(client):
-    """并发提交同一候选：唯一约束兜底，两边拿到同一任务。"""
+    """真实并发提交同一候选：唯一约束兜底，全部返回同一任务且无 5xx。
+
+    state.conn 是线程本地连接代理，每个请求线程各自持有 SQLite 连接，
+    共享 TestClient 并发提交是安全的；默认限流阈值 10，1 次上传 + 8 次提交不触发。
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
     candidate = create_candidate(client)
-    results = []
-    for _ in range(2):
-        results.append(submit_generation(client, candidate["candidate_id"]))
-    assert results[0]["generation_id"] == results[1]["generation_id"]
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(
+            lambda _: submit_generation(client, candidate["candidate_id"]),
+            range(8),
+        ))
+    assert len({r["generation_id"] for r in results}) == 1
     done = wait_generation(client, results[0]["generation_id"])
     assert done["status"] == "succeeded"

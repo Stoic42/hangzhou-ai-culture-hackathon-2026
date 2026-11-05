@@ -88,14 +88,21 @@ def test_unavailable_provider_yields_503(client, monkeypatch):
 
 
 def test_rate_limit_exceeded(limited_client):
-    """阈值 3：第 4 次创建 → 429 rate_limited；公共库浏览不受限。"""
-    for _ in range(3):
+    """阈值 3：交错验证公共库浏览不占候选创建配额。
+
+    先用掉 2 次配额，中间穿插 10 次 GET /buddies，第 3 次创建仍应 201；
+    第 4 次创建才 429。
+    """
+    for _ in range(2):
         resp = upload_candidate(limited_client, make_wav(0.2))
         assert resp.status_code == 201, resp.text
+    # 公共库浏览不计入限流配额：穿插多次不影响剩余配额
+    for _ in range(10):
+        assert limited_client.get("/api/v1/buddies").status_code == 200
+    resp = upload_candidate(limited_client, make_wav(0.2))
+    assert resp.status_code == 201, resp.text
     _assert_error_shape(upload_candidate(limited_client, make_wav(0.2)),
                         429, "rate_limited")
-    # 公共库接口不计入限流
-    assert limited_client.get("/api/v1/buddies").status_code == 200
 
 
 def test_error_response_unified_shape(client):
