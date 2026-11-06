@@ -85,7 +85,7 @@ async def stats_page(request: Request):
     return _page(request, "stats.html", {
         "counters": db.get_counters(state.conn),
         "rate_limit_per_min": state.settings.rate_limit_per_min,
-        "provider": state.settings.provider,
+        "provider": f"{state.settings.asr_provider}/{state.settings.llm_provider}",
     })
 
 

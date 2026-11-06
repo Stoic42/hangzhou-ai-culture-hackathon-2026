@@ -36,3 +36,7 @@ node_modules/
 
 # Server runtime data (SQLite)
 server/data/
+
+# 本地 ASR 模型目录（sherpa-onnx SenseVoice，体积大不入库）
+server/models/
+models/

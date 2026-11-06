@@ -6,7 +6,7 @@
 - **confirmed-buddy-generation**（契约 4.2）：确认候选后异步生成具体规则包，校验通过后自动发布进公共库；已确认内容逐字不变。
 - **public-buddy-library**（契约 4.3）：无登录公共搭子库，提供稳定分页列表、详情与 manifest 下载；发布不可变，支持内部撤回。
 
-技术栈：FastAPI + SQLite（WAL），AI 能力通过可插拔 Provider 接入。默认 `stub` Provider 为确定性假数据，本地可跑通全链路；真实 ASR/LLM 经 `SERVER_PROVIDER=remote` 切换（`providers/remote.py` 为占位实现，需在源码中补全）。
+技术栈：FastAPI + SQLite（WAL），AI 能力通过可插拔 Provider 接入。默认 `stub` Provider 为确定性假数据，本地可跑通全链路；LLM 经 `SERVER_LLM_PROVIDER=remote` 切换为真实 OpenAI 兼容接口（`providers/openai_llm.py`，输出经 `generation/validate.py` 全量校验）；本地离线语音识别经 `SERVER_ASR_PROVIDER=local` 切换为 sherpa-onnx 适配器（`providers/local_asr.py`，默认针对 SenseVoice-small）。remote ASR 仍为占位，待后续任务接入。
 
 ## 快速开始
 
@@ -25,21 +25,96 @@ py -3.12 -m uvicorn server.app.main:app
 py -3.12 -m pytest server/tests -v
 ```
 
-当前 43 个用例全部通过，另经 uvicorn 真实启动冒烟（上传 WAV → 候选 → 生成 → 公共库 → 后台撤回 → 410）。
+当前 82 个用例全部通过（另有 1 个 local ASR 真机集成用例在未配置 `ASR_MODEL_DIR` 时自动跳过），另经 uvicorn 真实启动冒烟（上传 WAV → 候选 → 生成 → 公共库 → 后台撤回 → 410）。
+
+## 部署
+
+### 部署资源自动补全
+
+部署到服务器后先运行引导脚本（幂等，可重复执行；只做检查与补全，不启动服务）：
+
+```bash
+py -3.12 server/tools/ensure_resources.py
+```
+
+脚本按当前环境变量检查：基础依赖缺失时自动 `pip install -r server/requirements.txt`；`SERVER_ASR_PROVIDER=local` 时检查 sherpa-onnx 与 ASR 模型目录（缺失时自动下载解压 SenseVoice 模型，约 1GB）；`SERVER_LLM_PROVIDER=remote` 时检查 `OPENAI_*` 环境变量（只报缺失项，不打印任何值）。最后打印配置摘要；退出码 0=就绪，1=有缺失。
+
+### 生产环境变量清单
+
+| 变量 | 生产建议值 |
+|---|---|
+| `SERVER_ASR_PROVIDER` | `local`（服务器本机 sherpa-onnx 识别，音频不出内网） |
+| `ASR_MODEL_DIR` | SenseVoice 模型目录绝对路径（如 `/opt/sense-voice`） |
+| `SERVER_LLM_PROVIDER` | `remote`（OpenAI 兼容真实接口） |
+| `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | 指向所用 OpenAI 兼容服务；凭证只走环境变量，不入库 |
+| `SERVER_ADMIN_TOKEN` | 强随机口令，不设则 `/admin` 拒绝访问 |
+| `SERVER_BASE_URL` | 对外可访问的基础 URL，用于 `manifest_url` |
+| `SERVER_DB_PATH` | SQLite 文件路径（默认 `server/data/server.db`，注意备份） |
+
+### 启动
+
+```bash
+py -3.12 -m uvicorn server.app.main:app --host 0.0.0.0 --port 8000
+```
+
+2C2G 低配服务器建议：ASR 模型使用 int8 量化（`model.int8.onnx`，约 230MB；不要用 fp32 `model.onnx`），适配器内识别线程数已固定为 `num_threads=2`（`providers/local_asr.py` 的 `_NUM_THREADS`），与 2 核机型匹配。
+
+### 真实联调实测（2026-11-07）
+
+- **remote LLM（DeepSeek，模型 `deepseek-chat`）**：候选生成与规则包生成均验证通过——真实语音候选 → DeepSeek 生成规则包 → 过 `generation/validate.py` 发布校验并入公共库，端到端闭环成功。
+- **local ASR（sherpa-onnx SenseVoice）**：真实中文语音识别验证通过；识别器首次请求惰性加载约 2.6s，后续每次识别约 0.4s。
+
+以上为 11-07 实测结果；remote ASR 仍为占位，待后续接入。
 
 ## 环境变量
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
 | `SERVER_DB_PATH` | `server/data/server.db` | SQLite 文件路径 |
-| `SERVER_PROVIDER` | `stub` | `stub`（确定性假数据）或 `remote`（真实服务占位） |
+| `SERVER_PROVIDER` | `stub` | 批量 Provider 开关（向后兼容）：`stub` 或 `remote`；被下面两个单独开关覆盖 |
+| `SERVER_ASR_PROVIDER` | 取 `SERVER_PROVIDER` | ASR 开关：`stub`（默认）\| `local`（sherpa-onnx 本地识别）\| `remote`（仍为占位） |
+| `SERVER_LLM_PROVIDER` | 取 `SERVER_PROVIDER` | LLM（候选 + 规则包生成）开关：`stub`（默认）\| `remote`（OpenAI 兼容真实接口） |
 | `SERVER_RATE_LIMIT_PER_MIN` | `10` | 每 IP 每分钟限流阈值，只作用于候选与生成接口，不影响公共库浏览/下载 |
 | `SERVER_ADMIN_TOKEN` | 空 | 管理后台口令；为空时 `/admin` 显示“未配置”提示页并拒绝操作 |
 | `SERVER_BASE_URL` | `http://127.0.0.1:8000` | 对外基础 URL，用于详情响应中的 `manifest_url` |
-| `ASR_REMOTE_URL` | 空 | remote ASR 服务地址（占位） |
-| `LLM_REMOTE_URL` / `LLM_REMOTE_KEY` | 空 | remote LLM 服务地址与密钥（占位） |
+| `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容端点地址，可指向任意兼容服务 |
+| `OPENAI_API_KEY` | 空 | OpenAI 兼容接口密钥，remote LLM 必需，缺失即 `503 generation_unavailable` |
+| `OPENAI_MODEL` | `gpt-4o-mini` | 候选与规则包生成使用的模型名 |
+| `OPENAI_TIMEOUT_SEC` | `60` | LLM 请求超时（秒），不合法值在启动期即报错；网络/超时/5xx 均映射为 `generation_unavailable` |
+| `ASR_REMOTE_URL` | 空 | remote ASR 服务地址（仍为占位） |
+| `ASR_MODEL_DIR` | 空 | local ASR 模型目录（SenseVoice-small），空串或未配齐文件时请求期报 503 |
 
-**凭证只走环境变量，不进仓库、不入代码、模板与日志。** 远程服务的真实接入需自行补全 `providers/remote.py` 中的三个方法，并保证输出通过 `server/app/generation/validate.py` 的全量校验。
+**凭证只走环境变量，不进仓库、不入代码、模板与日志。** remote LLM 的 prompt 要求输出 JSON 并经 `server/app/generation/validate.py` 全量校验，解析/校验失败会把错误反馈给模型重试（最多 2 次重试）；remote ASR 尚未接入。
+
+## local ASR（sherpa-onnx 本地识别）
+
+`SERVER_ASR_PROVIDER=local` 时使用 `providers/local_asr.py` 在服务器本机完成语音识别，音频不出内网、不落盘。sherpa-onnx 是**可选依赖**，默认针对 **SenseVoice-small** 模型：
+
+```bash
+py -3.12 -m pip install sherpa-onnx   # 仅 local ASR 需要，可单独安装
+```
+
+模型下载（确切包名 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2`，解压前约 1GB（含多语言模型文件），**不入库**，放任意本地目录；`server/tools/ensure_resources.py` 可自动下载解压）：
+
+- sherpa-onnx 官方 release：
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
+- ModelScope 镜像（境内更快）：https://modelscope.cn/models/iic/SenseVoiceSmall
+
+目录结构（`ASR_MODEL_DIR` 指向该目录）：
+
+```
+sense-voice/
+├── model.int8.onnx   # 优先使用；没有则用 model.onnx
+├── model.onnx        # 备选（两者至少其一）
+└── tokens.txt        # 必需
+```
+
+```bash
+export ASR_MODEL_DIR=/path/to/sense-voice
+export SERVER_ASR_PROVIDER=local
+```
+
+请求期语义：模型目录未配置/文件不全、未安装 `sherpa-onnx` 或识别器初始化失败，该次请求返回 `503 generation_unavailable`（服务本身照常启动）；静音等无文本输入返回 `422 speech_unrecognized`。识别器在首次请求时惰性加载，识别输出自动剥掉 `<|zh|>` 等元信息标签。测试里的真机集成用例在未设置 `ASR_MODEL_DIR` 时自动跳过。
 
 ## API 摘要
 

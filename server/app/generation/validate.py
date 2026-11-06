@@ -23,6 +23,19 @@ _spec.loader.exec_module(_mod)
 
 validate_manifest_shared = _mod.validate_manifest
 
+# 白名单常量：与 shared 校验器单一来源，供 LLM prompt 生成等处复用，
+# 改动这里即同时影响校验与 prompt（避免两处分叉）
+EVENTS = _mod.EVENTS
+ACTIONS = _mod.ACTIONS
+COMPARE_OPS = _mod.COMPARE_OPS
+OUTCOMES = _mod.OUTCOMES
+AVATAR_FACES = _mod.AVATAR_FACES
+AVATAR_EYES = _mod.AVATAR_EYES
+AVATAR_MOUTHS = _mod.AVATAR_MOUTHS
+AVATAR_MOTION_STYLES = _mod.AVATAR_MOTION_STYLES
+AVATAR_EXPRESSIONS = _mod.AVATAR_EXPRESSIONS
+AVATAR_MOTIONS = _mod.AVATAR_MOTIONS
+
 # 设备侧硬上限（device/t5/src/buddy_engine.h），Python 校验器不含这些约束
 MAX_NODES = 16
 MAX_TRANSITIONS_PER_NODE = 8
