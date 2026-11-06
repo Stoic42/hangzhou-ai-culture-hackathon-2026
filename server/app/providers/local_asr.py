@@ -13,12 +13,17 @@
 
 线程安全：sherpa-onnx 的 OfflineRecognizer 是否可多线程共享推理未见官方
 明确保证，这里串行化 decode（展会并发低，正确性优先）。
+
+单测的假 sherpa_onnx 模块形状以本适配器的调用代码为准（sys.modules 注入）；
+与真实 sherpa-onnx API 的兼容性由 skipif 真机集成用例（配置 ASR_MODEL_DIR
+后启用）保障。
 """
 
 from __future__ import annotations
 
 import io
 import re
+import sys
 import threading
 import wave
 from array import array
@@ -79,7 +84,8 @@ def _wav_to_float32(audio: bytes) -> array:
         raise SpeechUnrecognized(f"仅支持单声道，实际 {channels} 声道")
     samples = array("h")
     samples.frombytes(frames)
-    if samples.itemsize != 2:  # pragma: no cover - 大端平台防御
+    if sys.byteorder == "big":
+        # WAV 帧按小端存放；大端平台需交换字节序还原有符号采样
         samples.byteswap()
     floats = array("f", (s / 32768.0 for s in samples))
     return _resample_linear(floats, rate, _EXPECTED_RATE)
