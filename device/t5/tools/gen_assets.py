@@ -9,7 +9,7 @@ Inputs (relative to the repository root):
 Outputs (device/t5/src/generated/):
   builtin_presets.c              preset JSON blobs + builtin resource table
   feedback_pcm.c                 PCM bytes + size + sha256 hex
-  buddy_font.c                   LVGL v8 SimSun 16 subset font (via lv_font_conv)
+  buddy_*.c                      Noto Sans SC subset fonts and West Lake backgrounds
 
 Usage (repository root):
   py -3.12 device/t5/tools/gen_assets.py [--sdk F:/t5open]
@@ -20,8 +20,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -30,23 +28,14 @@ REPO_ROOT = DEVICE_DIR.parent.parent
 SRC_DIR = DEVICE_DIR / "src"
 OUT_DIR = SRC_DIR / "generated"
 PRESET_ORDER = ["last-one.json", "do-now.json", "decide-now.json"]
-C_RE = re.compile(r'"(?:[^"\\]|\\.)*"')
-
-
-def collect_cjk(text: str) -> str:
-    return "".join(sorted({c for c in text if ord(c) > 0x7F}))
-
-
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sdk", default=r"F:\t5open", help="TuyaOpen SDK path")
+    parser.add_argument("--font", type=Path, default=Path("C:/Windows/Fonts/NotoSansSC-VF.ttf"))
     args = parser.parse_args()
-    sdk = Path(args.sdk)
-    font_woff = sdk / "src/liblvgl/v8/lvgl/scripts/built_in_font/SimSun.woff"
-    if not font_woff.is_file():
-        print(f"error: SimSun.woff not found at {font_woff}", file=sys.stderr)
+    font_path = args.font
+    if not font_path.is_file():
+        print(f"error: Noto Sans SC variable TTF missing at {font_path}", file=sys.stderr)
         return 2
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -64,56 +53,6 @@ def main() -> int:
     pcm_path = REPO_ROOT / "shared/assets/feedback.pcm"
     pcm = pcm_path.read_bytes()
     pcm_sha = hashlib.sha256(pcm).hexdigest()
-
-    # ---- font ----------------------------------------------------------------
-    ui_header = (SRC_DIR / "ui_text.h").read_text(encoding="utf-8")
-    ui_strings = [m.group(0)[1:-1] for m in C_RE.finditer(ui_header)]
-    chars = set()
-    for _, text in presets:
-        chars.update(text)
-    # The regex already returns the decoded Python str; iterating it directly
-    # keeps CJK and full-width punctuation intact. Do NOT round-trip through
-    # encode/decode("unicode_escape") -- that mangles non-ASCII into Latin-1
-    # mojibake and drops the glyphs the UI actually needs.
-    for s in ui_strings:
-        chars.update(s)
-    cjk = collect_cjk("".join(chars))
-    symbols_path = OUT_DIR / "font_symbols.txt"
-    symbols_path.write_text(cjk, encoding="utf-8")
-    font_out = OUT_DIR / "buddy_font.c"
-    import shutil
-
-    npx = shutil.which("npx") or shutil.which("npx.cmd")
-    if not npx:
-        print("error: npx not found on PATH", file=sys.stderr)
-        return 2
-    cmd = [
-        npx, "--yes", "lv_font_conv@latest",
-        "--size", "16",
-        "--bpp", "4",
-        "--format", "lvgl",
-        "--font", str(font_woff),
-        "--symbols", cjk,
-        "-r", "0x20-0x7E",
-        "--no-compress",
-        "--no-prefilter",
-        "--force-fast-kern-format",
-        "-o", str(font_out),
-    ]
-    print("running:", " ".join(cmd[:6]), "...")
-    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
-    if proc.returncode != 0 or not font_out.is_file():
-        print(proc.stdout)
-        print(proc.stderr, file=sys.stderr)
-        print("error: lv_font_conv failed", file=sys.stderr)
-        return 1
-    # rename the font symbol to our own name
-    font_text = font_out.read_text(encoding="utf-8")
-    font_text = re.sub(
-        r"const lv_font_t \w+ = \{", "const lv_font_t buddy_font = {", font_text
-    )
-    font_out.write_text(font_text, encoding="utf-8")
-    print(f"font: {len(cjk)} CJK glyphs -> {font_out}")
 
     # ---- builtin_presets.c ---------------------------------------------------
     lines = [
@@ -155,6 +94,11 @@ def main() -> int:
     pcm_lines.append("};")
     pcm_lines.append("")
     (OUT_DIR / "feedback_pcm.c").write_text("\n".join(pcm_lines) + "\n", encoding="ascii")
+
+    from gen_ui_fonts import generate
+    generate(SRC_DIR, font_path)
+    from gen_lake import write_assets
+    write_assets(OUT_DIR / "buddy_lakes.c")
 
     print(f"presets: {len(presets)} manifests embedded")
     print(f"pcm: {len(pcm)} bytes sha256={pcm_sha}")
