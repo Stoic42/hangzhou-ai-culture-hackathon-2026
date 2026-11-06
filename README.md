@@ -33,6 +33,7 @@ AI不直接下发代码，而是组合经过验证的行为图规则；T5负责�
 | 当前结论与待验证项 | [讨论记录](docs/project/decisions.md) |
 | 赛事要求与日程 | [赛事摘要](docs/event/guide.md) · [赛程](docs/event/schedule.md) |
 | T5规格与现场资源 | [硬件资源](docs/event/hardware.md) |
+| 当前电脑接入、端口与功能验收证据 | [11月6日硬件检查](docs/project/hardware-check-2026-11-06.md) |
 | 提交与路演材料 | [提交材料](docs/project/submission.md) |
 | 初期《拓》《蓝》《剪》档案 | [历史档案](archive/initial-directions/README.md) |
 
