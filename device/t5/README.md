@@ -4,6 +4,8 @@
 主界面滑动选择三只本地预设搭子，点按进入离线游戏，长按查看详情；生成页显示离线不可用。
 游戏页按规则包v1执行触摸迁移、条件、变量与倒计时，倒计时归零强制"被搭子带跑"结局。
 
+[烧录镜像与实机记录](firmware/烧录说明.md) · [当前界面与待审核设计稿](../../docs/project/T5界面设计/README.md)
+
 ## 工具链
 
 使用官方TuyaOpen。SDK位于开发机项目外的`F:\t5open`，不进入公开仓库。
@@ -39,14 +41,14 @@ tos.py monitor # 选择实际CH342 B号日志口（本机初次识别COM8）
 2. `shared/assets/feedback.pcm`（16kHz mono 16bit）以字节数组嵌入
    （`generated/feedback_pcm.c`）。资源表登记其size与SHA-256；开局前用`tal_sha256_ret`
    校验嵌入数据与固件资源表一致，manifest声明与固件表不符或散列错误时拒绝开局。
-3. UI中文使用SimSun子集字体（`generated/buddy_font.c`），由`lv_font_conv`基于
-   SDK内置`SimSun.woff`生成，只包含预设文本与`src/ui_text.h`中的界面字符
-   （SDK自带的1000部首版SimSun字体无法覆盖全部预设文案，故生成子集字体）。
+3. 中文使用 Noto Sans SC 字形子集。27 张妖怪状态图来自项目角色目录，三套西湖背景由脚本生成。
 
-重新生成资产（修改预设、`ui_text.h`或feedback.pcm后必须执行，需要Node.js/npx联网）：
+重新生成资产需要 Python 和 Pillow。在仓库根目录执行以下命令，字体参数指向本机的 Noto Sans SC 可变字体文件。
 
 ```bash
-py -3.12 device/t5/tools/gen_assets.py --sdk F:\t5open   # 仓库根目录执行
+python device/t5/tools/gen_assets.py --font <NotoSansSC-VF.ttf>
+python device/t5/tools/gen_sprites.py
+python device/t5/src/verify_font_coverage.py
 ```
 
 ## 验收提示

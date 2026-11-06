@@ -20,11 +20,17 @@
 #include "tkl_audio.h"
 #include "tkl_output.h"
 
+#include "buddy_sprites.h"
 #include "buddy_engine.h"
 #include "builtin_assets.h"
 #include "ui_text.h"
 
 LV_FONT_DECLARE(buddy_font);
+LV_FONT_DECLARE(buddy_display);
+LV_FONT_DECLARE(buddy_heading);
+LV_FONT_DECLARE(buddy_caption);
+LV_FONT_DECLARE(buddy_button);
+extern const lv_image_dsc_t buddy_lakes[3];
 
 /* 466x466 round panel: every coordinate below is checked against the circle
  * (center 233,233, r 233). Chord half-width at y is sqrt(233^2 - (y-233)^2). */
@@ -32,12 +38,12 @@ LV_FONT_DECLARE(buddy_font);
 #define SCREEN_RADIUS 233
 
 #define PRESET_COUNT_MAX 4
-#define COLOR_BG 0x0A0E17        /**< deep dark pixel-night background */
-#define COLOR_TEXT 0xF2F4F7
-#define COLOR_TEXT_DIM 0x98A2B3
-#define COLOR_ACCENT 0xA3E635    /**< saturated lime */
-#define COLOR_DANGER 0xFF3B30    /**< saturated red */
-#define COLOR_PANEL 0x151B2C
+#define COLOR_BG 0x101A29
+#define COLOR_TEXT 0xFFF2DC
+#define COLOR_TEXT_DIM 0xD3D2C8
+#define COLOR_ACCENT 0xF0C783
+#define COLOR_DANGER 0xFFC1AB
+#define SPRITE_SIZE 256
 #define AVATAR_SIZE 160          /**< pixel monster body, multiple of 8 */
 
 typedef struct {
@@ -56,9 +62,9 @@ static TDL_AUDIO_HANDLE_T s_audio;
 static lv_obj_t *s_card;
 static lv_obj_t *s_current_screen;  /**< live screen; replaced atomically on nav */
 static lv_obj_t *s_label_name;
-static lv_obj_t *s_label_personality;
-static lv_obj_t *s_label_tag;
-static lv_obj_t *s_label_index;
+static lv_obj_t *s_home_scene;
+static lv_obj_t *s_home_play;
+static lv_obj_t *s_home_index;
 static lv_obj_t *s_avatar_root;
 
 /* game widgets */
@@ -66,6 +72,7 @@ static lv_obj_t *s_game_area;
 static lv_obj_t *s_label_timer;
 static lv_obj_t *s_label_title;
 static lv_obj_t *s_label_instruction;
+static lv_obj_t *s_label_progress;
 static lv_obj_t *s_end_panel;
 static lv_obj_t *s_label_outcome;
 static lv_timer_t *s_game_timer;
@@ -74,6 +81,9 @@ static buddy_session_t s_session;
 static bool s_session_active;
 
 /* avatar parts */
+static lv_obj_t *s_avatar_image;
+static const char *s_game_frame;
+static uint32_t s_reconsider_since;
 static lv_obj_t *s_avatar_face;
 static lv_obj_t *s_avatar_eye_l;
 static lv_obj_t *s_avatar_eye_r;
@@ -106,7 +116,7 @@ static void nav_load(lv_obj_t *new_screen)
     if (old != NULL && old != new_screen && s_avatar_face != NULL &&
         lv_obj_get_screen(s_avatar_face) == old) {
         s_avatar_root = NULL;
-        s_avatar_face = NULL;
+        s_avatar_face = NULL; s_avatar_image = NULL;
         s_avatar_eye_l = NULL;
         s_avatar_eye_r = NULL;
         s_avatar_mouth = NULL;
@@ -416,7 +426,9 @@ static void avatar_apply(const buddy_t *buddy, buddy_expression_t expr)
 static lv_obj_t *avatar_create(lv_obj_t *parent)
 {
     lv_obj_t *root = lv_obj_create(parent);
-    lv_obj_set_size(root, AVATAR_SIZE + 30, AVATAR_SIZE + 30);
+    lv_obj_set_size(root, SPRITE_SIZE, SPRITE_SIZE);
+    lv_obj_set_style_pad_all(root, 0, 0);
+    lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_style_bg_opa(root, LV_OPA_TRANSP, LV_PART_MAIN);
     lv_obj_set_style_border_width(root, 0, LV_PART_MAIN);
 
@@ -449,9 +461,28 @@ static lv_obj_t *avatar_create(lv_obj_t *parent)
         lv_obj_add_flag(s_avatar_tooth[i], LV_OBJ_FLAG_HIDDEN);
     }
 
+    s_avatar_image = lv_image_create(root);
+    lv_image_set_antialias(s_avatar_image, false);
+    lv_image_set_scale(s_avatar_image, 256 * (SPRITE_SIZE / 64));
+    lv_obj_center(s_avatar_image);
     lv_obj_set_scrollbar_mode(s_avatar_face, LV_SCROLLBAR_MODE_OFF);
     lv_obj_set_scrollbar_mode(root, LV_SCROLLBAR_MODE_OFF);
     return root;
+}
+
+static void avatar_frame(const buddy_t *buddy, const char *frame, buddy_expression_t fallback)
+{
+    const lv_image_dsc_t *image = buddy_sprite(buddy->buddy_id, frame);
+    if (image) {
+        lv_obj_add_flag(s_avatar_face, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_avatar_image, LV_OBJ_FLAG_HIDDEN);
+        lv_image_set_src(s_avatar_image, image);
+        lv_obj_center(s_avatar_image);
+    } else {
+        lv_obj_add_flag(s_avatar_image, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_remove_flag(s_avatar_face, LV_OBJ_FLAG_HIDDEN);
+        avatar_apply(buddy, fallback);
+    }
 }
 
 static void motion_timer_cb(lv_timer_t *timer)
@@ -459,6 +490,11 @@ static void motion_timer_cb(lv_timer_t *timer)
     (void)timer;
     if (!s_avatar_face) {
         return;
+    }
+    if (s_session_active && s_game_frame && !strcmp(s_game_frame, "reconsider") &&
+        lv_tick_elaps(s_reconsider_since) >= 300) {
+        s_game_frame = "offer_a";
+        avatar_frame(s_session.buddy, s_game_frame, s_session.expression);
     }
     lv_obj_t *root = lv_obj_get_parent(s_avatar_face);
     s_motion_tick++;
@@ -497,8 +533,7 @@ static void motion_timer_cb(lv_timer_t *timer)
             return;
         }
     }
-    lv_obj_align(root, LV_ALIGN_TOP_MID, 0, 0);
-    lv_obj_set_pos(root, s_avatar_base_x + dx, s_avatar_base_y + dy);
+    lv_obj_align(root, LV_ALIGN_TOP_MID, s_avatar_base_x + dx, s_avatar_base_y + dy);
 }
 
 static void avatar_set_motion(buddy_motion_t motion, buddy_motion_style_t style)
@@ -622,15 +657,52 @@ static lv_obj_t *make_label(lv_obj_t *parent, const char *text, lv_color_t color
     return label;
 }
 
-/** Chunky pixel-style button: sharp square corners, saturated accent fill. */
-static lv_obj_t *make_pixel_button(lv_obj_t *parent, const char *text, int16_t w, int16_t h)
+static const uint32_t lake_ink[] = {0x101A29, 0x102621, 0x231E30};
+static const uint32_t lake_accent[] = {0xF0C783, 0xA9DEC1, 0xE9BEDB};
+
+static unsigned theme_index(void)
+{
+    const char *id = s_presets[s_selected].buddy.buddy_id;
+    if (!strcmp(id, "bdy_preset_do_now")) return 1;
+    if (!strcmp(id, "bdy_preset_decide_now")) return 2;
+    return 0;
+}
+
+static void set_scene(lv_obj_t *screen, lv_obj_t *scene)
+{
+    unsigned i = theme_index();
+    lv_obj_set_style_bg_color(screen, lv_color_hex(lake_ink[i]), 0);
+    lv_image_set_src(scene, &buddy_lakes[i]);
+    lv_obj_align(scene, LV_ALIGN_TOP_MID, 0, 56);
+}
+
+static lv_obj_t *make_scene(lv_obj_t *screen)
+{
+    lv_obj_t *scene = lv_image_create(screen);
+    lv_image_set_antialias(scene, false);
+    set_scene(screen, scene);
+    return scene;
+}
+
+static lv_obj_t *display_label(lv_obj_t *parent, const char *text, int y)
+{
+    lv_obj_t *label = make_label(parent, text, lv_color_hex(COLOR_TEXT));
+    lv_obj_set_style_text_font(label, &buddy_display, 0);
+    lv_obj_align(label, LV_ALIGN_TOP_MID, 0, y);
+    return label;
+}
+
+static lv_obj_t *make_button(lv_obj_t *parent, const char *text, int16_t w, int16_t h)
 {
     lv_obj_t *btn = lv_button_create(parent);
     lv_obj_set_size(btn, w, h);
-    lv_obj_set_style_radius(btn, 0, LV_PART_MAIN);
-    lv_obj_set_style_bg_color(btn, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
+    lv_obj_set_style_radius(btn, h / 2, 0);
+    lv_obj_set_style_pad_all(btn, 0, 0);
+    lv_obj_set_style_shadow_width(btn, 0, 0);
+    lv_obj_set_style_bg_color(btn, lv_color_hex(lake_accent[theme_index()]), LV_PART_MAIN);
     lv_obj_set_style_border_width(btn, 0, LV_PART_MAIN);
     lv_obj_t *btn_label = make_label(btn, text, lv_color_hex(COLOR_BG));
+    lv_obj_set_style_text_font(btn_label, &buddy_button, 0);
     lv_obj_center(btn_label);
     return btn;
 }
@@ -641,26 +713,14 @@ static void home_refresh_card(void)
     const buddy_t *buddy = &slot->buddy;
 
     lv_label_set_text(s_label_name, slot->parsed ? buddy->name : "---");
-    lv_label_set_text(s_label_personality, slot->parsed ? buddy->personality : slot->err);
-
-    if (slot->parsed && buddy->tag_count > 0) {
-        char tag_buf[48];
-        snprintf(tag_buf, sizeof(tag_buf), "#%s", buddy->tags[0]);
-        for (int i = 1; i < buddy->tag_count; i++) {
-            size_t used = strlen(tag_buf);
-            snprintf(tag_buf + used, sizeof(tag_buf) - used, "  #%s", buddy->tags[i]);
-        }
-        lv_label_set_text(s_label_tag, tag_buf);
-    } else {
-        lv_label_set_text(s_label_tag, "");
-    }
-
-    char index_buf[12];
-    snprintf(index_buf, sizeof(index_buf), UI_HOME_INDEX_FMT, s_selected + 1, s_preset_count);
-    lv_label_set_text(s_label_index, index_buf);
+    set_scene(lv_obj_get_parent(s_home_scene), s_home_scene);
+    lv_color_t accent = lv_color_hex(lake_accent[theme_index()]);
+    lv_obj_set_style_bg_color(s_home_play, accent, 0);
+    lv_obj_set_style_text_color(s_home_index, accent, 0);
+    lv_label_set_text_fmt(s_home_index, UI_HOME_INDEX_FMT, s_selected + 1, s_preset_count);
 
     if (slot->parsed) {
-        avatar_apply(buddy, BUDDY_EXPR_NEUTRAL);
+        avatar_frame(buddy, "idle", BUDDY_EXPR_NEUTRAL);
         avatar_set_motion(BUDDY_MOTION_STILL, buddy->motion_style);
     }
 }
@@ -745,7 +805,7 @@ static void generate_click_cb(lv_event_t *event)
 {
     (void)event;
     lv_obj_t *screen = lv_obj_create(NULL);
-    lv_obj_set_style_bg_color(screen, lv_color_hex(COLOR_BG), LV_PART_MAIN);
+    lv_obj_set_style_bg_color(screen, lv_color_hex(lake_ink[theme_index()]), LV_PART_MAIN);
     lv_obj_add_event_cb(screen, back_to_home_cb, LV_EVENT_GESTURE, NULL);
     lv_obj_clear_flag(screen, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -755,7 +815,7 @@ static void generate_click_cb(lv_event_t *event)
     lv_obj_t *msg = make_label(screen, UI_GEN_UNAVAILABLE, lv_color_hex(COLOR_TEXT_DIM));
     lv_obj_align(msg, LV_ALIGN_CENTER, 0, -20);
 
-    lv_obj_t *back = make_pixel_button(screen, UI_BTN_BACK, 120, 48);
+    lv_obj_t *back = make_button(screen, UI_BTN_BACK, 120, 48);
     lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -24);
     lv_obj_add_event_cb(back, back_to_home_cb, LV_EVENT_CLICKED, NULL);
 
@@ -769,48 +829,39 @@ static void show_home(void)
     lv_obj_t *s_home = lv_obj_create(NULL);
     lv_obj_set_style_bg_color(s_home, lv_color_hex(COLOR_BG), LV_PART_MAIN);
     lv_obj_clear_flag(s_home, LV_OBJ_FLAG_SCROLLABLE);
+    if (s_preset_count == 0) {
+        lv_obj_t *error = make_label(s_home, UI_VALIDATION_FAILED, lv_color_hex(COLOR_TEXT));
+        lv_obj_set_width(error, 348);
+        lv_obj_center(error);
+        nav_load(s_home);
+        return;
+    }
 
-    lv_obj_t *title = make_label(s_home, UI_APP_TITLE, lv_color_hex(COLOR_ACCENT));
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 16);
-
-    char subtitle[40];
-    snprintf(subtitle, sizeof(subtitle), "%s (%d)", UI_HOME_SUBTITLE, s_preset_count);
-    lv_obj_t *subtitle_label = make_label(s_home, subtitle, lv_color_hex(COLOR_TEXT_DIM));
-    lv_obj_align(subtitle_label, LV_ALIGN_TOP_MID, 0, 44);
+    s_home_scene = make_scene(s_home);
+    lv_obj_t *title = make_label(s_home, UI_APP_TITLE, lv_color_hex(COLOR_TEXT));
+    lv_obj_set_style_text_font(title, &buddy_heading, 0);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 21);
+    s_home_index = make_label(s_home, "", lv_color_hex(COLOR_TEXT_DIM));
+    lv_obj_set_style_text_font(s_home_index, &buddy_caption, 0);
+    lv_obj_align(s_home_index, LV_ALIGN_TOP_MID, 0, 55);
 
     s_avatar_root = avatar_create(s_home);
-    lv_obj_align(s_avatar_root, LV_ALIGN_TOP_MID, 0, 74);
     s_avatar_base_x = 0;
-    s_avatar_base_y = 74;
-
-    s_label_name = make_label(s_home, "", lv_color_hex(COLOR_TEXT));
-    lv_obj_align(s_label_name, LV_ALIGN_TOP_MID, 0, 268);
-
-    s_label_personality = make_label(s_home, "", lv_color_hex(COLOR_TEXT_DIM));
-    lv_obj_set_width(s_label_personality, 280);
-    lv_obj_align(s_label_personality, LV_ALIGN_TOP_MID, 0, 296);
-
-    s_label_tag = make_label(s_home, "", lv_color_hex(COLOR_ACCENT));
-    lv_obj_align(s_label_tag, LV_ALIGN_TOP_MID, 0, 322);
-
-    s_label_index = make_label(s_home, "", lv_color_hex(COLOR_TEXT_DIM));
-    lv_obj_align(s_label_index, LV_ALIGN_TOP_MID, 0, 346);
-
+    s_avatar_base_y = 68;
+    lv_obj_align(s_avatar_root, LV_ALIGN_TOP_MID, 0, s_avatar_base_y);
+    s_label_name = display_label(s_home, "", 307);
     lv_obj_t *hint = make_label(s_home, UI_HOME_HINT, lv_color_hex(COLOR_TEXT_DIM));
-    lv_obj_set_width(hint, 300);
-    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 372);
+    lv_obj_align(hint, LV_ALIGN_TOP_MID, 0, 350);
+    s_home_play = make_button(s_home, UI_HOME_PLAY, 174, 49);
+    lv_obj_align(s_home_play, LV_ALIGN_TOP_MID, 0, 388);
 
-    /* 180x46 at BOTTOM_MID -24 -> y 396..442; bottom corners need
-     * half-chord >= 90 at y=442: sqrt(233^2-209^2) = 103. OK. */
-    lv_obj_t *generate = make_pixel_button(s_home, UI_BTN_GENERATE, 180, 46);
-    lv_obj_align(generate, LV_ALIGN_BOTTOM_MID, 0, -24);
-    lv_obj_add_event_cb(generate, generate_click_cb, LV_EVENT_CLICKED, NULL);
-
+    /* One hit surface keeps tapping the illustrated button and swiping or
+     * holding on the portrait on the same gesture classifier. */
     s_card = lv_obj_create(s_home);
-    lv_obj_set_size(s_card, 300, 300);
-    lv_obj_align(s_card, LV_ALIGN_TOP_MID, 0, 68);
-    lv_obj_set_style_bg_opa(s_card, LV_OPA_TRANSP, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_card, 0, LV_PART_MAIN);
+    lv_obj_set_size(s_card, lv_pct(100), lv_pct(100));
+    lv_obj_center(s_card);
+    lv_obj_set_style_bg_opa(s_card, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(s_card, 0, 0);
     /* Non-scrollable: otherwise an elastic scroll (default on plain objs)
      * swallows every drag and CLICKED is lost or mis-classified. */
     lv_obj_remove_flag(s_card, LV_OBJ_FLAG_SCROLLABLE);
@@ -856,39 +907,40 @@ static void show_detail_screen(uint8_t preset_index)
     lv_obj_set_style_bg_color(s_detail, lv_color_hex(COLOR_BG), LV_PART_MAIN);
     lv_obj_clear_flag(s_detail, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *title = make_label(s_detail, UI_DETAIL_TITLE, lv_color_hex(COLOR_ACCENT));
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 18);
+    lv_obj_set_style_bg_color(s_detail, lv_color_hex(lake_ink[theme_index()]), 0);
+    lv_obj_t *title = make_label(s_detail, UI_DETAIL_TITLE, lv_color_hex(lake_accent[theme_index()]));
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 23);
 
-    char buf[160];
-    lv_obj_t *body = lv_label_create(s_detail);
-    lv_obj_set_style_text_font(body, &buddy_font, LV_PART_MAIN);
-    lv_obj_set_style_text_color(body, lv_color_hex(COLOR_TEXT), LV_PART_MAIN);
-    /* long text: centered, width 320 -> x 73..399; the narrowest chord the
-     * text block can meet (y ~350) has half-width sqrt(233^2-117^2)=201,
-     * so 320 < 402 always stays inside the circle. */
-    lv_obj_set_width(body, 320);
-    lv_obj_set_style_text_align(body, LV_TEXT_ALIGN_CENTER, LV_PART_MAIN);
-    lv_label_set_long_mode(body, LV_LABEL_LONG_WRAP);
-    if (slot->parsed) {
-        snprintf(buf, sizeof(buf),
-                 "%s：%s\n\n%s：%s\n\n%s：%s\n\n%s：", UI_DETAIL_NAME, buddy->name,
-                 UI_DETAIL_PERSONALITY, buddy->personality, UI_DETAIL_GAMEPLAY, buddy->gameplay_summary,
-                 UI_DETAIL_TAGS);
-        lv_label_set_text(body, buf);
-        for (int i = 0; i < buddy->tag_count; i++) {
-            lv_label_ins_text(body, LV_LABEL_POS_LAST, i == 0 ? "" : "  ");
-            lv_label_ins_text(body, LV_LABEL_POS_LAST, buddy->tags[i]);
-        }
-        lv_label_ins_text(body, LV_LABEL_POS_LAST, "\n\n");
-        lv_label_ins_text(body, LV_LABEL_POS_LAST, UI_LOCAL_READY);
-    } else {
-        lv_label_set_text(body, slot->err);
+    const lv_image_dsc_t *portrait = buddy_sprite(buddy->buddy_id, "detail");
+    if (portrait) {
+        lv_obj_t *image = lv_image_create(s_detail);
+        lv_image_set_src(image, portrait);
+        lv_image_set_antialias(image, false);
+        lv_image_set_scale(image, 512);
+        lv_obj_align(image, LV_ALIGN_CENTER, 0, -122);
     }
-    lv_obj_align(body, LV_ALIGN_TOP_MID, 0, 64);
+    display_label(s_detail, buddy->name, 177);
+    lv_obj_t *body = lv_obj_create(s_detail);
+    lv_obj_remove_style_all(body);
+    lv_obj_set_size(body, 340, 143);
+    lv_obj_align(body, LV_ALIGN_TOP_MID, 0, 230);
+    lv_obj_set_scroll_dir(body, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(body, LV_SCROLLBAR_MODE_AUTO);
+    lv_obj_t *bio = make_label(body, "", lv_color_hex(COLOR_TEXT_DIM));
+    lv_obj_set_width(bio, 330);
+    lv_obj_align(bio, LV_ALIGN_TOP_MID, 0, 0);
+    lv_label_set_text_fmt(bio, "%s\n%s\n%s", buddy->personality, buddy->gameplay_summary, UI_LOCAL_READY);
+    for (int i = 0; i < buddy->tag_count; i++) {
+        lv_label_ins_text(bio, LV_LABEL_POS_LAST, i ? "  " : "\n");
+        lv_label_ins_text(bio, LV_LABEL_POS_LAST, buddy->tags[i]);
+    }
 
-    lv_obj_t *back = make_pixel_button(s_detail, UI_BTN_BACK, 120, 48);
-    lv_obj_align(back, LV_ALIGN_BOTTOM_MID, 0, -24);
+    lv_obj_t *back = make_button(s_detail, UI_BTN_BACK, 88, 48);
+    lv_obj_align(back, LV_ALIGN_TOP_MID, -81, 383);
     lv_obj_add_event_cb(back, back_to_home_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *generate = make_button(s_detail, UI_BTN_GENERATE, 150, 48);
+    lv_obj_align(generate, LV_ALIGN_TOP_MID, 46, 383);
+    lv_obj_add_event_cb(generate, generate_click_cb, LV_EVENT_CLICKED, NULL);
 
     nav_load(s_detail);
 }
@@ -902,7 +954,9 @@ static void game_end_ui(void)
     bool escaped = s_session.outcome == BUDDY_OUTCOME_ESCAPED;
     lv_label_set_text(s_label_outcome, escaped ? UI_OUTCOME_ESCAPED : UI_OUTCOME_CARRIED);
     lv_obj_set_style_text_color(s_label_outcome,
-                                lv_color_hex(escaped ? COLOR_ACCENT : COLOR_DANGER), LV_PART_MAIN);
+                                lv_color_hex(escaped ? lake_accent[theme_index()] : COLOR_DANGER), LV_PART_MAIN);
+    lv_obj_add_flag(s_label_title, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(s_label_timer, UI_ENDED);
     lv_obj_clear_flag(s_end_panel, LV_OBJ_FLAG_HIDDEN);
     PR_NOTICE("buddy %s: game ended (%s)", s_session.buddy->buddy_id,
               escaped ? "escaped" : "carried_away");
@@ -913,14 +967,31 @@ static void game_refresh_node(void)
     const buddy_t *buddy = s_session.buddy;
     const buddy_node_t *node = &buddy->nodes[s_session.current_node];
 
-    lv_label_set_text(s_label_title, node->title);
-    lv_label_set_text(s_label_instruction, node->instruction);
+    const char *title = node->title;
+    const char *hint = node->instruction;
+    lv_label_set_text(s_label_progress, "");
+    if (strcmp(buddy->buddy_id, "bdy_preset_last_one") == 0 && s_session.outcome == BUDDY_OUTCOME_NONE) {
+        if (strcmp(node->id, "invite") == 0) {
+            title = UI_INVITE;
+            hint = UI_INVITE_HINT;
+        } else if (strcmp(node->id, "refused") == 0) {
+            int index = buddy_find_var(buddy, "refusals");
+            if (index >= 0) {
+                int count = s_session.var_values[index];
+                hint = count == 2 ? UI_REFUSE_HINT : UI_REFUSE_FIRST;
+                lv_label_set_text_fmt(s_label_progress, UI_REFUSED_FMT, count);
+            }
+        }
+    }
+    lv_label_set_text(s_label_title, title);
+    lv_label_set_text(s_label_instruction, hint);
 
-    char timer_buf[20];
-    snprintf(timer_buf, sizeof(timer_buf), UI_GAME_REMAINING_FMT, s_session.remaining_sec);
-    lv_label_set_text(s_label_timer, timer_buf);
+    lv_label_set_text_fmt(s_label_timer, UI_GAME_REMAINING_FMT, s_session.remaining_sec);
 
-    avatar_apply(buddy, s_session.expression);
+    const char *frame = s_game_frame ? s_game_frame : "idle";
+    if (s_session.outcome == BUDDY_OUTCOME_ESCAPED) frame = "success";
+    if (s_session.outcome == BUDDY_OUTCOME_CARRIED_AWAY) frame = "timeout";
+    avatar_frame(buddy, frame, s_session.expression);
     avatar_set_motion(s_session.motion, buddy->motion_style);
 }
 
@@ -939,6 +1010,8 @@ static void game_tick_cb(lv_timer_t *timer)
         } else {
             game_refresh_node();
         }
+    } else {
+        lv_label_set_text_fmt(s_label_timer, UI_GAME_REMAINING_FMT, s_session.remaining_sec);
     }
 }
 
@@ -971,13 +1044,47 @@ static void game_log_state(const char *what)
               s_session.remaining_sec);
 }
 
+/* The destination alone does not distinguish repeated gestures or the chosen tassel. */
+static const char *game_frame_after(const char *from, buddy_event_t event)
+{
+    const buddy_t *buddy = s_session.buddy;
+    const char *node = buddy->nodes[s_session.current_node].id;
+    if (!strcmp(buddy->buddy_id, "bdy_preset_last_one")) {
+        if (!strcmp(node, "refused")) {
+            int v = buddy_find_var(buddy, "refusals");
+            return v >= 0 && s_session.var_values[v] >= 2 ? "refuse_2" : "refuse_1";
+        }
+        if (!strcmp(node, "appended")) return "accept";
+        return event == BUDDY_EVENT_GAME_START ? "plead" : "beckon";
+    }
+    if (!strcmp(buddy->buddy_id, "bdy_preset_do_now")) {
+        if (!strcmp(node, "acting")) {
+            int v = buddy_find_var(buddy, "actions_done");
+            return v >= 0 && s_session.var_values[v] >= 2 ? "step_2" : "step_1";
+        }
+        if (event == BUDDY_EVENT_GAME_START) return "nudge";
+        return !strcmp(from, "acting") ? "reset" : "stall";
+    }
+    if (!strcmp(buddy->buddy_id, "bdy_preset_decide_now")) {
+        if (!strcmp(node, "locked")) return !strcmp(from, "offer_b") ? "lock_b" : "lock_a";
+        if (event == BUDDY_EVENT_TAP && !strcmp(from, "locked")) {
+            s_reconsider_since = lv_tick_get();
+            return "reconsider";
+        }
+        return !strcmp(node, "offer_b") ? "offer_b" : "offer_a";
+    }
+    return "idle";
+}
+
 static void game_dispatch(buddy_event_t event)
 {
     if (!s_session_active || s_session.outcome != BUDDY_OUTCOME_NONE) {
         return;
     }
     game_log_state(game_event_name(event));
+    const char *from = s_session.buddy->nodes[s_session.current_node].id;
     if (buddy_session_handle(&s_session, event, &SESSION_OPS)) {
+        s_game_frame = game_frame_after(from, event);
         if (s_session.outcome != BUDDY_OUTCOME_NONE) {
             s_session_active = false;
             game_refresh_node();
@@ -1046,6 +1153,7 @@ static void game_restart_cb(lv_event_t *event)
 {
     (void)event;
     lv_obj_add_flag(s_end_panel, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_remove_flag(s_label_title, LV_OBJ_FLAG_HIDDEN);
     buddy_session_start(&s_session, &s_presets[s_selected].buddy);
     s_session_active = true;
     lv_timer_reset(s_game_timer);
@@ -1065,29 +1173,25 @@ static void show_game(uint8_t preset_index)
     lv_obj_set_style_bg_color(s_game, lv_color_hex(COLOR_BG), LV_PART_MAIN);
     lv_obj_clear_flag(s_game, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* Round-screen header: top corners are outside the circle (chord at
-     * y=10 is only 135 wide), so back and timer stack centered instead of
-     * hugging the clipped corners. */
-    lv_obj_t *back = make_pixel_button(s_game, UI_GAME_BACK, 76, 36);
-    lv_obj_align(back, LV_ALIGN_TOP_MID, 0, 12);
+    make_scene(s_game);
+    lv_obj_t *back = make_button(s_game, UI_GAME_BACK, 88, 44);
+    lv_obj_set_style_bg_color(back, lv_color_hex(0x2E4053), 0);
+    lv_obj_set_style_text_color(lv_obj_get_child(back, 0), lv_color_hex(COLOR_TEXT), 0);
+    lv_obj_align(back, LV_ALIGN_TOP_MID, -66, 34);
     lv_obj_add_event_cb(back, game_back_cb, LV_EVENT_CLICKED, NULL);
-
-    s_label_timer = make_label(s_game, "", lv_color_hex(COLOR_TEXT_DIM));
-    lv_obj_align(s_label_timer, LV_ALIGN_TOP_MID, 0, 52);
+    s_label_timer = make_label(s_game, "", lv_color_hex(COLOR_TEXT));
+    lv_obj_align(s_label_timer, LV_ALIGN_TOP_MID, 57, 41);
 
     lv_obj_t *avatar_root = avatar_create(s_game);
-    lv_obj_align(avatar_root, LV_ALIGN_TOP_MID, 0, 84);
     s_avatar_base_x = 0;
-    s_avatar_base_y = 84;
-    (void)avatar_root;
-
-    s_label_title = make_label(s_game, "", lv_color_hex(COLOR_TEXT));
-    lv_obj_set_style_text_font(s_label_title, &buddy_font, LV_PART_MAIN);
-    lv_obj_align(s_label_title, LV_ALIGN_TOP_MID, 0, 278);
-
+    s_avatar_base_y = 68;
+    lv_obj_align(avatar_root, LV_ALIGN_TOP_MID, 0, s_avatar_base_y);
+    s_label_title = display_label(s_game, "", 305);
     s_label_instruction = make_label(s_game, "", lv_color_hex(COLOR_TEXT_DIM));
-    lv_obj_set_width(s_label_instruction, 300);
-    lv_obj_align(s_label_instruction, LV_ALIGN_TOP_MID, 0, 306);
+    lv_obj_set_width(s_label_instruction, 306);
+    lv_obj_align(s_label_instruction, LV_ALIGN_TOP_MID, 0, 357);
+    s_label_progress = make_label(s_game, "", lv_color_hex(lake_accent[theme_index()]));
+    lv_obj_align(s_label_progress, LV_ALIGN_TOP_MID, 0, 398);
 
     /* game area covers everything below the header; gestures drive events */
     s_game_area = lv_obj_create(s_game);
@@ -1098,29 +1202,26 @@ static void show_game(uint8_t preset_index)
     /* Non-scrollable: an elastic scroll here would swallow drags without
      * ever producing CLICKED or GESTURE (the input black hole). */
     lv_obj_remove_flag(s_game_area, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(s_game_area, game_area_event_cb,
-                        LV_EVENT_CLICKED | LV_EVENT_LONG_PRESSED | LV_EVENT_GESTURE, NULL);
+    lv_obj_add_event_cb(s_game_area, game_area_event_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_add_event_cb(s_game_area, game_area_event_cb, LV_EVENT_LONG_PRESSED, NULL);
+    lv_obj_add_event_cb(s_game_area, game_area_event_cb, LV_EVENT_GESTURE, NULL);
     lv_obj_add_event_cb(s_game_area, buddy_touch_begin, LV_EVENT_PRESSED, NULL);
     lv_obj_add_event_cb(s_game_area, buddy_touch_move, LV_EVENT_PRESSING, NULL);
     lv_obj_add_event_cb(s_game_area, game_area_release_cb, LV_EVENT_RELEASED, NULL);
     lv_obj_move_foreground(back); /* back button stays clickable above area */
 
-    /* ending overlay: 280x150 centered -> corners at (93,158)/(373,308),
-     * worst radius sqrt(140^2+75^2) = 159 << 233. Square-corner pixel panel. */
+    /* Result controls occupy their own rows below the animal. Keep the
+     * final node's narrative visible between the outcome and restart. */
     s_end_panel = lv_obj_create(s_game);
-    lv_obj_set_size(s_end_panel, 280, 150);
-    lv_obj_center(s_end_panel);
-    lv_obj_set_style_bg_color(s_end_panel, lv_color_hex(COLOR_PANEL), LV_PART_MAIN);
-    lv_obj_set_style_radius(s_end_panel, 0, LV_PART_MAIN);
-    lv_obj_set_style_border_width(s_end_panel, 4, LV_PART_MAIN);
-    lv_obj_set_style_border_color(s_end_panel, lv_color_hex(COLOR_ACCENT), LV_PART_MAIN);
+    lv_obj_remove_style_all(s_end_panel);
+    lv_obj_remove_flag(s_end_panel, LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_size(s_end_panel, 340, 126);
+    lv_obj_align(s_end_panel, LV_ALIGN_TOP_MID, 0, 305);
     lv_obj_add_flag(s_end_panel, LV_OBJ_FLAG_HIDDEN);
-    s_label_outcome = make_label(s_end_panel, "", lv_color_hex(COLOR_TEXT));
-    lv_obj_align(s_label_outcome, LV_ALIGN_TOP_MID, 0, 24);
-    lv_obj_t *restart = make_pixel_button(s_end_panel, UI_BTN_RESTART, 140, 44);
-    lv_obj_align(restart, LV_ALIGN_BOTTOM_MID, 0, -18);
+    s_label_outcome = display_label(s_end_panel, "", 0);
+    lv_obj_t *restart = make_button(s_end_panel, UI_BTN_RESTART, 176, 48);
+    lv_obj_align(restart, LV_ALIGN_TOP_MID, 0, 88);
     lv_obj_add_event_cb(restart, game_restart_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_move_foreground(s_end_panel);
 
     /* fresh session */
     buddy_session_start(&s_session, buddy);
@@ -1152,6 +1253,7 @@ static void audio_init(void)
 
 void buddy_app_init(void)
 {
+    PR_NOTICE("buddy: hangzhou lake UI v2 (27 frames)");
     builtin_resource_digest_init();
     input_thresholds_init();
 
