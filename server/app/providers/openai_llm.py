@@ -1,12 +1,12 @@
 """OpenAI 兼容的远程 LLM 适配器：真实实现候选生成与规则包生成。
 
 经 POST {OPENAI_BASE_URL}/chat/completions 调用，response_format 固定为
-json_object。凭证只从环境变量读取，不写入仓库与日志：
+json_object。凭证只从环境变量读取（经 config.Settings 解析），不写入仓库与日志：
 
 - OPENAI_BASE_URL：默认 https://api.openai.com/v1（可指向任意 OpenAI 兼容端点）
 - OPENAI_API_KEY：必需，缺失即 GenerationUnavailable
 - OPENAI_MODEL：默认 gpt-4o-mini
-- OPENAI_TIMEOUT_SEC：默认 60
+- OPENAI_TIMEOUT_SEC：默认 60，解析错误在启动期抛 ValueError
 
 重试策略：解析/校验失败时把上一次的错误反馈给模型重试，最多 2 次重试
 （共 3 次调用）；网络/超时/5xx 直接抛 GenerationUnavailable，不做重试。
@@ -15,10 +15,12 @@ json_object。凭证只从环境变量读取，不写入仓库与日志：
 from __future__ import annotations
 
 import json
-import os
+import threading
 
 import httpx
 
+from ..config import Settings, get_settings
+from ..generation import validate as rules_validate
 from ..generation.validate import validate_for_publish
 from ..library.publish import build_manifest
 from .base import ContentNotSupported, GenerationFailed, GenerationUnavailable
@@ -27,11 +29,13 @@ MAX_ATTEMPTS = 3  # 首次调用 + 2 次重试
 
 
 def _post_chat(messages: list[dict], *, base_url: str, api_key: str,
-               model: str, timeout: float) -> dict:
+               model: str, timeout: float,
+               client: httpx.Client | None = None) -> dict:
     """POST /chat/completions 并返回响应 JSON。
 
     网络错误、超时、5xx 与非法响应体统一抛 GenerationUnavailable。
-    独立成模块级函数，测试可 monkeypatch 注入假响应，绝不打真实网络。
+    client 传 None 时按 timeout 临时创建；独立成模块级函数，测试可
+    monkeypatch 注入假响应或用 httpx.MockTransport 打真实 HTTP 层。
     """
     url = f"{base_url.rstrip('/')}/chat/completions"
     payload = {
@@ -40,9 +44,12 @@ def _post_chat(messages: list[dict], *, base_url: str, api_key: str,
         "response_format": {"type": "json_object"},
     }
     headers = {"Authorization": f"Bearer {api_key}"}
+    if client is None:
+        with httpx.Client(timeout=timeout) as temp:
+            return _post_chat(messages, base_url=base_url, api_key=api_key,
+                              model=model, timeout=timeout, client=temp)
     try:
-        with httpx.Client(timeout=timeout) as client:
-            resp = client.post(url, json=payload, headers=headers)
+        resp = client.post(url, json=payload, headers=headers)
     except httpx.HTTPError as exc:
         raise GenerationUnavailable(f"LLM 请求失败: {type(exc).__name__}") from exc
     if resp.status_code >= 400:
@@ -65,7 +72,7 @@ def _extract_content(response: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
-# prompt 构造
+# prompt 构造（白名单段落由 shared 校验器常量程序化生成，单一来源）
 # ---------------------------------------------------------------------------
 
 _CANDIDATE_SYSTEM = """你是「当代妖怪收容所」的主题设计师。这个装置把用户说出的\
@@ -73,7 +80,7 @@ _CANDIDATE_SYSTEM = """你是「当代妖怪收容所」的主题设计师。这
 你要把它变成一个让人会心一笑、可以做成小游戏的妖怪。
 
 只输出一个 JSON 对象，恰好四个字段：
-- "name"：妖怪名字，不超过 8 个汉字，俏皮可爱；
+- "name"：妖怪名字，不超过 8 个字，俏皮可爱；
 - "personality"：一句话性格，不超过 40 字；
 - "gameplay_summary"：玩法简介，不超过 60 字，必须说清玩家要做什么、怎么算赢；
 - "theme_tags"：1 到 4 个简短主题标签组成的数组。
@@ -82,36 +89,65 @@ _CANDIDATE_SYSTEM = """你是「当代妖怪收容所」的主题设计师。这
 轻松小游戏的主题，不要强行生成，只输出 {"unsupported": true}。
 除此之外必须给出四个字段，不要输出其他文字。"""
 
-_GAME_SYSTEM = """你是「当代妖怪收容所」的关卡设计师。已确认的妖怪搭子元信息（content）\
+# 各动作允许的取值；不在表内的动作按固定文案描述
+_ACTION_VALUES: dict[str, tuple[set[str], str]] = {
+    "avatar.expression": (rules_validate.AVATAR_EXPRESSIONS, "value ∈ "),
+    "avatar.motion": (rules_validate.AVATAR_MOTIONS, "value ∈ "),
+    "game.end": (rules_validate.OUTCOMES, "outcome ∈ "),
+}
+
+
+def _whitelist_block() -> str:
+    """由 shared 校验器常量生成封闭值域段落（单一来源，改动常量即改动 prompt）。"""
+    v = rules_validate
+    lines = [
+        "avatar 封闭枚举：",
+        f"- face ∈ {' | '.join(sorted(v.AVATAR_FACES))}",
+        f"- eyes ∈ {' | '.join(sorted(v.AVATAR_EYES))}",
+        f"- mouth ∈ {' | '.join(sorted(v.AVATAR_MOUTHS))}",
+        f"- motion_style ∈ {' | '.join(sorted(v.AVATAR_MOTION_STYLES))}",
+        "- palette：2—4 个 #RRGGBB 颜色",
+        "",
+        "game 封闭值域：",
+        f"- 事件白名单：{'、'.join(sorted(v.EVENTS))}",
+        "- 动作白名单：",
+    ]
+    for action in sorted(v.ACTIONS):
+        enum = _ACTION_VALUES.get(action)
+        if enum is not None:
+            values, label = enum
+            lines.append(f"  - {action}，{label}{' | '.join(sorted(values))}")
+        elif action == "audio.play":
+            lines.append('  - audio.play，resource_id 只能是 "feedback"')
+        elif action == "timer.start":
+            lines.append("  - timer.start，seconds 为正整数")
+        elif action in ("var.set", "var.increment"):
+            lines.append(
+                f"  - {action}，name 必须是已声明的变量，value 是整数")
+    lines.append(
+        f"- condition 的 op ∈ {' | '.join(sorted(v.COMPARE_OPS))}，right 为整数常量")
+    return "\n".join(lines)
+
+
+def _game_system_prompt() -> str:
+    # 叙事与示例保留手写；白名单段落由校验器常量生成
+    return """你是「当代妖怪收容所」的关卡设计师。已确认的妖怪搭子元信息（content）\
 会逐字给你，你要为它设计一个 60—90 秒的触控小游戏规则包和它的虚拟形象。\
 玩法要呼应 content 的主题与性格，不要照搬示例。
 
 只输出一个 JSON 对象，恰好两个键："avatar" 与 "game"。全部取值必须来自下面的\
 封闭值域与硬约束，任何超出都会被判非法：
 
-avatar 约束：
-- face ∈ round | square | bean
-- eyes ∈ sleepy | wide | side | dot
-- mouth ∈ small | grin | flat | open
-- motion_style ∈ drowsy | jittery | still | bouncy
-- palette：2—4 个 #RRGGBB 颜色
+""" + _whitelist_block() + """
 
-game 约束：
+game 结构硬约束：
 - duration_sec：60—90 的整数
 - variables：不超过 4 个，每项 type 只能是 "int"，initial 是整数
 - nodes：不超过 16 个；每节点 transitions 不超过 8 条；on_enter 与 transitions 里的\
 actions 每个列表不超过 6 个动作
-- 事件白名单：game.start、touch.tap、touch.long_press、touch.swipe、timer.elapsed
-- 动作白名单与取值：
-  - avatar.expression，value ∈ neutral | pleading | happy | smug | anxious | sleepy | angry
-  - avatar.motion，value ∈ still | breathe | shake | bounce | nod
-  - audio.play，resource_id 只能是 "feedback"
-  - timer.start，seconds 为正整数
-  - var.set / var.increment，name 必须是已声明的变量，value 是整数
-  - game.end，outcome ∈ escaped | carried_away
 - 每个节点必有非空 id、title、instruction；initial_node 必须指向存在的节点
 - condition（可选）形如 {"left": {"var": "已声明变量"} 或 {"remaining_sec": true},\
-"op": "eq|neq|gt|gte|lt|lte", "right": 整数常量}
+"op": 上述集合之一, "right": 整数常量}
 - 必须同时存在 escaped 与 carried_away 两个结局节点（game.end），且从 initial_node\
 可达 escaped（carried_away 由全局超时强制，不考核可达性）
 
@@ -180,7 +216,7 @@ def _game_messages(content: dict, feedback: str | None) -> list[dict]:
             + json.dumps(content, ensure_ascii=False))
     if feedback:
         user += f"\n\n上一次你输出的规则包未通过校验，请修正后重新输出合法 JSON：\n{feedback}"
-    return [{"role": "system", "content": _GAME_SYSTEM},
+    return [{"role": "system", "content": _game_system_prompt()},
             {"role": "user", "content": user}]
 
 
@@ -198,8 +234,8 @@ def _validate_candidate(data: object) -> str | None:
     name = data.get("name")
     if not isinstance(name, str) or not name.strip():
         return "name 必须是非空字符串"
-    if len(name) > 8:
-        return f"name 超过 8 个汉字: {name!r}"
+    if len(name) > 8:  # 按字符数约束（对齐 prompt "不超过 8 个字"）
+        return f"name 超过 8 个字符: {name!r}"
     personality = data.get("personality")
     if not isinstance(personality, str) or not personality.strip():
         return "personality 必须是非空字符串"
@@ -234,22 +270,38 @@ def _parse_candidate(raw: str) -> tuple[dict | None, str | None, bool]:
 # ---------------------------------------------------------------------------
 
 class OpenAILLMGeneration:
-    """OpenAI 兼容端点上的真实 LLM 生成器。"""
+    """OpenAI 兼容端点上的真实 LLM 生成器（构造注入 Settings）。"""
 
-    def __init__(self) -> None:
-        self._base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-        self._api_key = os.environ.get("OPENAI_API_KEY", "")
-        self._model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-        self._timeout = float(os.environ.get("OPENAI_TIMEOUT_SEC", "60"))
+    def __init__(self, settings: Settings | None = None) -> None:
+        if settings is None:
+            settings = get_settings()
+        self._base_url = settings.openai_base_url
+        self._api_key = settings.openai_api_key
+        self._model = settings.openai_model
+        self._timeout = settings.openai_timeout_sec
+        self._client: httpx.Client | None = None
+        self._client_lock = threading.Lock()
 
     def _ensure(self) -> None:
         if not self._api_key:
             raise GenerationUnavailable("remote LLM 未配置 OPENAI_API_KEY")
 
+    def _get_client(self) -> httpx.Client:
+        """惰性创建并复用 httpx.Client；runner 线程共享，双重检查锁防竞态
+        （极端并发下重复创建无害，最后一个胜出被复用）。"""
+        client = self._client
+        if client is None:
+            with self._client_lock:
+                if self._client is None:
+                    self._client = httpx.Client(timeout=self._timeout)
+                client = self._client
+        return client
+
     def _call(self, messages: list[dict]) -> str:
         self._ensure()
         response = _post_chat(messages, base_url=self._base_url, api_key=self._api_key,
-                              model=self._model, timeout=self._timeout)
+                              model=self._model, timeout=self._timeout,
+                              client=self._get_client())
         return _extract_content(response)
 
     def make_candidate_content(self, text: str) -> dict:

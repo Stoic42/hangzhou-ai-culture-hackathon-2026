@@ -32,6 +32,10 @@ class Settings:
     rate_limit_per_min: int
     admin_token: str
     base_url: str
+    openai_base_url: str = "https://api.openai.com/v1"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    openai_timeout_sec: float = 60.0
     candidate_ttl_sec: int = 86400
     audio_max_bytes: int = 2 * 1024 * 1024
     audio_max_duration_sec: int = 30
@@ -50,6 +54,12 @@ def get_settings() -> Settings:
         rate_limit_per_min=int(os.environ.get("SERVER_RATE_LIMIT_PER_MIN", "10")),
         admin_token=os.environ.get("SERVER_ADMIN_TOKEN", ""),
         base_url=os.environ.get("SERVER_BASE_URL", "http://127.0.0.1:8000").rstrip("/"),
+        openai_base_url=os.environ.get(
+            "OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/"),
+        openai_api_key=os.environ.get("OPENAI_API_KEY", ""),
+        openai_model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
+        # 解析失败自然抛 ValueError，启动期即暴露配置错误
+        openai_timeout_sec=float(os.environ.get("OPENAI_TIMEOUT_SEC", "60")),
     )
 
 

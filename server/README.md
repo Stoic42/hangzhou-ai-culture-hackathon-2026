@@ -25,7 +25,7 @@ py -3.12 -m uvicorn server.app.main:app
 py -3.12 -m pytest server/tests -v
 ```
 
-当前 64 个用例全部通过，另经 uvicorn 真实启动冒烟（上传 WAV → 候选 → 生成 → 公共库 → 后台撤回 → 410）。
+当前 73 个用例全部通过，另经 uvicorn 真实启动冒烟（上传 WAV → 候选 → 生成 → 公共库 → 后台撤回 → 410）。
 
 ## 环境变量
 
@@ -33,7 +33,7 @@ py -3.12 -m pytest server/tests -v
 |---|---|---|
 | `SERVER_DB_PATH` | `server/data/server.db` | SQLite 文件路径 |
 | `SERVER_PROVIDER` | `stub` | 批量 Provider 开关（向后兼容）：`stub` 或 `remote`；被下面两个单独开关覆盖 |
-| `SERVER_ASR_PROVIDER` | 取 `SERVER_PROVIDER` | ASR 开关：`stub`（默认）\| `local`（占位，选择即报不可用）\| `remote`（仍为占位） |
+| `SERVER_ASR_PROVIDER` | 取 `SERVER_PROVIDER` | ASR 开关：`stub`（默认）\| `local`（占位，请求期报 503）\| `remote`（仍为占位） |
 | `SERVER_LLM_PROVIDER` | 取 `SERVER_PROVIDER` | LLM（候选 + 规则包生成）开关：`stub`（默认）\| `remote`（OpenAI 兼容真实接口） |
 | `SERVER_RATE_LIMIT_PER_MIN` | `10` | 每 IP 每分钟限流阈值，只作用于候选与生成接口，不影响公共库浏览/下载 |
 | `SERVER_ADMIN_TOKEN` | 空 | 管理后台口令；为空时 `/admin` 显示“未配置”提示页并拒绝操作 |
@@ -41,7 +41,7 @@ py -3.12 -m pytest server/tests -v
 | `OPENAI_BASE_URL` | `https://api.openai.com/v1` | OpenAI 兼容端点地址，可指向任意兼容服务 |
 | `OPENAI_API_KEY` | 空 | OpenAI 兼容接口密钥，remote LLM 必需，缺失即 `503 generation_unavailable` |
 | `OPENAI_MODEL` | `gpt-4o-mini` | 候选与规则包生成使用的模型名 |
-| `OPENAI_TIMEOUT_SEC` | `60` | LLM 请求超时（秒）；网络/超时/5xx 均映射为 `generation_unavailable` |
+| `OPENAI_TIMEOUT_SEC` | `60` | LLM 请求超时（秒），不合法值在启动期即报错；网络/超时/5xx 均映射为 `generation_unavailable` |
 | `ASR_REMOTE_URL` | 空 | remote ASR 服务地址（仍为占位） |
 
 **凭证只走环境变量，不进仓库、不入代码、模板与日志。** remote LLM 的 prompt 要求输出 JSON 并经 `server/app/generation/validate.py` 全量校验，解析/校验失败会把错误反馈给模型重试（最多 2 次重试）；remote ASR 与 local ASR 尚未接入。
