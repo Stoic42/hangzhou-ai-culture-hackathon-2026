@@ -1,0 +1,66 @@
+feature: 2026-11-07-real-ai-providers
+created: 2026-11-07
+
+steps:
+  - action: remote LLM 适配器：providers/openai_llm.py，OpenAI 兼容端点 + JSON 模式 + 校验失败反馈重试（最多 2 次），同时服务候选与规则包生成
+    exit_signal: 假客户端测试全绿；校验失败错误反馈进下一轮 prompt；网络/超时/5xx 均映射 503 generation_unavailable
+    status: done
+  - action: 白名单程序化生成：prompt 内事件/动作白名单从 shared 校验器常量生成，杜绝双份漂移
+    exit_signal: 白名单与 validate_buddies.py 常量逐项一致（审查发现并修复）
+    status: done
+  - action: local ASR 适配器：providers/local_asr.py，sherpa-onnx SenseVoice 惰性加载、剥元信息标签、非 16kHz 重采样兜底
+    exit_signal: 假 sherpa_onnx 模块形状注入测试全绿；缺依赖/模型缺失请求期 503；真机集成用例配 ASR_MODEL_DIR 后通过
+    status: done
+  - action: 配置拆分：SERVER_ASR_PROVIDER / SERVER_LLM_PROVIDER 独立开关，SERVER_PROVIDER 保留为向后兼容默认
+    exit_signal: 各组合下单测全绿；缺 OPENAI_API_KEY 请求期 503
+    status: done
+  - action: 部署资源自动补全脚本 server/tools/ensure_resources.py：依赖/模型/环境变量检查补全，幂等，退出码 0/1
+    exit_signal: 已装环境运行退出码 0；打印配置摘要不泄露凭证
+    status: done
+  - action: 双审查收口：任务1（LLM 适配器）规格审查通过，质量审查 2 重要 + 次要修复后复审通过；任务2（本地 ASR）规格与质量审查通过
+    exit_signal: 82 passed + 1 skipped；真 key 联调端到端闭环
+    status: done
+
+checks:
+  - item: 校验失败把错误详情反馈模型重试，仍失败抛 503，绝不带病入库
+    source: openai_llm.py 重试设计
+    status: done
+  - item: prompt 白名单与 shared 校验器常量程序化一致
+    source: 质量审查重要发现
+    status: done
+  - item: httpx 连接复用线程安全（限流信号量内串行 + 异常强制重建）
+    source: 质量审查重要发现
+    status: done
+  - item: sherpa-onnx 为可选依赖；缺装/模型缺失/初始化失败请求期 503，服务照常启动
+    source: local_asr.py 降级语义
+    status: done
+  - item: 识别输出剥掉 <|zh|> 等元信息标签；非 16kHz 线性重采样兜底
+    source: local_asr.py
+    status: done
+  - item: 凭证只走环境变量，脚本与文档不打印任何凭证值
+    source: 隐私约束
+    status: done
+  - item: ensure_resources.py 幂等、不启动服务、下载失败给手动步骤
+    source: 部署脚本设计
+    status: done
+
+dod:
+  commands:
+    - id: CMD-001
+      command: py -3.12 -m pytest server/tests -v
+      core: true
+      failure_handling: fix-or-block
+      result: 82 passed + 1 skipped（local ASR 真机集成用例未配 ASR_MODEL_DIR 跳过）
+    - id: CMD-002
+      command: py -3.12 server/tools/ensure_resources.py（ASR_MODEL_DIR 指向已装模型目录）
+      core: true
+      failure_handling: fix-or-block
+      result: 退出码 0，配置摘要就绪
+    - id: CMD-003
+      command: 真实联调冒烟（2026-11-07）：真实中文语音 → 本地 SenseVoice（首次加载约 2.6s、后续约 0.4s/次）→ DeepSeek deepseek-chat 候选 → 规则包过发布校验入公共库
+      core: true
+      failure_handling: fix-or-block
+      result: 端到端闭环通过
+  evidence_required: [command_output, diff_summary]
+  cleanliness:
+    debug_output: allowed-for-state-and-errors
