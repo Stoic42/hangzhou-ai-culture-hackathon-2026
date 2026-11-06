@@ -1,0 +1,20 @@
+{
+  "base_ref": "main",
+  "branch": "feat/real-ai-providers",
+  "context_check": ".codestable/features/2026-11-07-real-ai-providers/real-ai-providers-learning-context-check.json",
+  "context_check_abs": "F:/Project/hangzhou-ai-culture-hackathon-2026/feat-real-ai-providers/.codestable/features/2026-11-07-real-ai-providers/real-ai-providers-learning-context-check.json",
+  "covered_diff": "main...441b1b84cfa35936cb0c3ae36a1639ca3c99df9c",
+  "covered_head": "441b1b84cfa35936cb0c3ae36a1639ca3c99df9c",
+  "created_at": "2026-11-06T20:44:47Z",
+  "last_seen_at": "2026-11-06T20:44:47Z",
+  "learning_report": ".codestable/features/2026-11-07-real-ai-providers/real-ai-providers-learning-report.md",
+  "learning_report_abs": "F:/Project/hangzhou-ai-culture-hackathon-2026/feat-real-ai-providers/.codestable/features/2026-11-07-real-ai-providers/real-ai-providers-learning-report.md",
+  "merge_readiness": ".codestable/features/2026-11-07-real-ai-providers/real-ai-providers-merge-readiness.json",
+  "merge_readiness_abs": "F:/Project/hangzhou-ai-culture-hackathon-2026/feat-real-ai-providers/.codestable/features/2026-11-07-real-ai-providers/real-ai-providers-merge-readiness.json",
+  "next_action": "merge feat/real-ai-providers into main after owner approval",
+  "schema_version": 1,
+  "snoozed_until": null,
+  "status": "ready-to-merge",
+  "unit": ".codestable/features/2026-11-07-real-ai-providers",
+  "worktree": "F:/Project/hangzhou-ai-culture-hackathon-2026/feat-real-ai-providers"
+}
