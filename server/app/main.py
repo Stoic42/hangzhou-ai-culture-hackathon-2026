@@ -13,7 +13,7 @@ from .admin import routes as admin_routes
 from .generation import candidates as generation_candidates
 from .generation import tasks as generation_tasks
 from .library import routes as library_routes
-from .providers.remote import build_providers
+from .providers import build_providers
 from .util import RateLimiter
 
 _APP_DIR = Path(__file__).resolve().parent
@@ -59,7 +59,7 @@ def create_app() -> FastAPI:
     db.init_schema(bootstrap_conn)
     bootstrap_conn.close()
 
-    asr, generation = build_providers(settings.provider)
+    asr, generation = build_providers(settings)
 
     app = FastAPI(title="当代妖怪收容所 · 生成服务与公共搭子库")
     app.state.settings = settings
