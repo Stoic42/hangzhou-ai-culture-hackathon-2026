@@ -17,8 +17,9 @@ from server.app import config
 from server.app.generation import validate as rules_validate
 from server.app.providers import base, build_providers
 from server.app.providers import openai_llm
+from server.app.providers.local_asr import SherpaLocalASR
 from server.app.providers.openai_llm import OpenAILLMGeneration
-from server.app.providers.remote import LocalASR, RemoteASR, RemoteGeneration
+from server.app.providers.remote import RemoteASR, RemoteGeneration
 from server.app.providers.stub import StubASR, StubGeneration
 
 
@@ -393,14 +394,23 @@ def test_build_providers_remote(monkeypatch):
     assert generation._model == settings.openai_model
 
 
-def test_build_providers_local_placeholder(monkeypatch):
-    """local ASR 装配不失败，请求期抛 GenerationUnavailable（503 语义）。"""
+def test_build_providers_local(monkeypatch):
+    """local ASR 装配为 SherpaLocalASR；未配置模型目录时请求期抛
+    GenerationUnavailable（503 语义）。"""
     settings = _settings(monkeypatch, SERVER_ASR_PROVIDER="local")
     asr, generation = build_providers(settings)
-    assert isinstance(asr, LocalASR)
+    assert isinstance(asr, SherpaLocalASR)
     assert isinstance(generation, StubGeneration)
-    with pytest.raises(base.GenerationUnavailable, match="local ASR 未实现"):
+    with pytest.raises(base.GenerationUnavailable, match="本地模型未配置"):
         asr.transcribe(b"audio", "zh-CN")
+
+
+def test_whitelist_block_rejects_unknown_action(monkeypatch):
+    """校验器新增动作而 prompt 文案未跟进时必须显式抛错（防静默漏报）。"""
+    monkeypatch.setattr(rules_validate, "ACTIONS",
+                        rules_validate.ACTIONS | {"ghost.new_action"})
+    with pytest.raises(ValueError, match="ghost.new_action"):
+        openai_llm._game_system_prompt()
 
 
 def test_build_providers_unknown(monkeypatch):

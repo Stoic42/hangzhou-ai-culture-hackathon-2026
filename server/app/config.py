@@ -11,6 +11,7 @@
 - SERVER_BASE_URL：对外基础 URL，用于 manifest_url，默认 http://127.0.0.1:8000
 - OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL / OPENAI_TIMEOUT_SEC：OpenAI 兼容 LLM 配置
 - ASR_REMOTE_URL：remote ASR 服务地址（仍为占位）
+- ASR_MODEL_DIR：local ASR（sherpa-onnx）模型目录，默认空串表示未配置
 """
 
 from __future__ import annotations
@@ -39,6 +40,7 @@ class Settings:
     candidate_ttl_sec: int = 86400
     audio_max_bytes: int = 2 * 1024 * 1024
     audio_max_duration_sec: int = 30
+    asr_model_dir: str = ""  # ASR_MODEL_DIR，local ASR 模型目录，空串表示未配置
 
 
 @lru_cache
@@ -60,6 +62,7 @@ def get_settings() -> Settings:
         openai_model=os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
         # 解析失败自然抛 ValueError，启动期即暴露配置错误
         openai_timeout_sec=float(os.environ.get("OPENAI_TIMEOUT_SEC", "60")),
+        asr_model_dir=os.environ.get("ASR_MODEL_DIR", ""),
     )
 
 

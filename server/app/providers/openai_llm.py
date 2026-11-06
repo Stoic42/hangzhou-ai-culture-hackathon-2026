@@ -124,6 +124,11 @@ def _whitelist_block() -> str:
         elif action in ("var.set", "var.increment"):
             lines.append(
                 f"  - {action}，name 必须是已声明的变量，value 是整数")
+        else:
+            # 校验器新增动作时必须同步补 prompt 文案，否则封闭值域段落
+            # 会静默漏报，模型无从得知合法取值
+            raise ValueError(
+                f"动作 {action!r} 缺少 prompt 文案分支，请在 _whitelist_block 中补充")
     lines.append(
         f"- condition 的 op ∈ {' | '.join(sorted(v.COMPARE_OPS))}，right 为整数常量")
     return "\n".join(lines)

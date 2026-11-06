@@ -2,14 +2,16 @@
 
 - stub：确定性假数据（默认，本地可跑全链路）
 - remote：真实服务（LLM 为 OpenAI 兼容接口；ASR 仍为占位）
-- local：本地 ASR 占位（任务 2 接入），装配占位 Provider，请求期抛 GenerationUnavailable
+- local：本地 sherpa-onnx ASR（providers/local_asr.py），模型目录缺失或
+  依赖未安装时装配不失败，请求期抛 GenerationUnavailable
 """
 
 from __future__ import annotations
 
 from ..config import Settings
 from .base import ASRProvider, GenerationProvider
-from .remote import LocalASR, RemoteASR, RemoteGeneration
+from .local_asr import SherpaLocalASR
+from .remote import RemoteASR, RemoteGeneration
 from .stub import StubASR, StubGeneration
 
 __all__ = ["build_providers"]
@@ -22,8 +24,7 @@ def build_providers(settings: Settings) -> tuple[ASRProvider, GenerationProvider
     elif settings.asr_provider == "remote":
         asr = RemoteASR()
     elif settings.asr_provider == "local":
-        # 本地 ASR 任务 2 接入；装配占位 Provider，请求期抛 GenerationUnavailable
-        asr = LocalASR()
+        asr = SherpaLocalASR(settings)
     else:
         raise ValueError(f"未知 SERVER_ASR_PROVIDER: {settings.asr_provider!r}")
 
