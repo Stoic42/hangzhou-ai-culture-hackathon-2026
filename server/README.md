@@ -94,11 +94,11 @@ py -3.12 -m uvicorn server.app.main:app --host 0.0.0.0 --port 8000
 py -3.12 -m pip install sherpa-onnx   # 仅 local ASR 需要，可单独安装
 ```
 
-模型下载（体积约 230MB，**不入库**，放任意本地目录）：
+模型下载（确切包名 `sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2`，解压前约 1GB（含多语言模型文件），**不入库**，放任意本地目录；`server/tools/ensure_resources.py` 可自动下载解压）：
 
-- sherpa-onnx 官方 release（含 SenseVoice-small 各格式）：
-  https://github.com/k2-fsa/sherpa-onnx/releases —— 搜 `sherpa-onnx-sense-voice-small-*.tar.bz2`
-- ModelScope 镜像：https://modelscope.cn/models/iic/SenseVoiceSmall
+- sherpa-onnx 官方 release：
+  https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17.tar.bz2
+- ModelScope 镜像（境内更快）：https://modelscope.cn/models/iic/SenseVoiceSmall
 
 目录结构（`ASR_MODEL_DIR` 指向该目录）：
 
