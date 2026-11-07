@@ -48,6 +48,15 @@ def test_overlong_wav_rejected(client):
                         "invalid_audio")
 
 
+def test_truncated_wav_with_riff_header_rejected(client):
+    """有 RIFF 头但块数据被截断的伪 WAV → 400 invalid_audio（不得 500）。
+
+    回归：wave 模块对截断块会抛裸 RuntimeError，须归为不可解析。
+    """
+    payload = b"RIFF" + b"\x24\x00\x00\x00" + b"WAVE" + b"__unavailable__" * 8
+    _assert_error_shape(upload_candidate(client, payload), 400, "invalid_audio")
+
+
 def test_forged_content_length_rejected_before_read(client):
     """伪造超大 Content-Length 的小音频在预检路径被拒绝 → 400 invalid_audio。"""
     resp = client.post(

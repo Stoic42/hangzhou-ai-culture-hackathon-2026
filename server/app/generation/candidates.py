@@ -29,7 +29,7 @@ def _wav_duration_sec(audio: bytes) -> float | None:
             frames = wf.getnframes()
             rate = wf.getframerate()
             return frames / float(rate) if rate else None
-    except (wave.Error, EOFError):
+    except (wave.Error, EOFError, RuntimeError):
         return None
 
 
