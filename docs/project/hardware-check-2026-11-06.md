@@ -51,3 +51,13 @@
 检索记录：2条网页查询，分别为`site.waveshare.net T5-E1 CH342 微雪 开发板`与`site.waveshare.com/wiki Tuya T5 AI CH342`。技术依据只采用官方条目，未采用搜索中出现的第三方测试固件。
 
 关联：[当前作品](../../README.md) · [设备端](../../device/t5/README.md) · [硬件资源](../event/hardware.md) · [讨论记录](decisions.md)。
+
+## 2026-11-07 原理图引脚查证（KEY键与IMU）
+
+来源：微雪官方原理图 [T5-E1-Touch-AMOLED-1.75_schematic.pdf](https://files.waveshare.com/wiki/T5-E1-Touch-AMOLED-1.75/T5-E1-Touch-AMOLED-1.75_schematic.pdf) 首页引脚功能表，配合KEY与6/9-Axis功能块图核对：
+
+- **用户KEY键（丝印USER_BOTTON）＝IO12**：10K上拉至3V3、对地按键，按下为低电平，带100nF消抖电容。另有独立RESET键。PWR键走电源控制，不复用为用户输入。
+- **QMI8658（原理图标QMI8658，I2C地址0x6B）**：QMI_SCL＝IO20、QMI_SDA＝IO21，与触摸TP、RTC、GPS共用同一I2C总线；中断QMI_INT1＝IO7、QMI_INT2＝IO9。
+- 排针H3引出IO14/15/16/17/47；IO18＝SYS_OUT、IO19＝SYS_EN、IO13＝BAT_ADC已被占用。
+
+结论：任务所需的用户键与IMU均为板载已接线资源，无需外接模块；固件侧需自行实现IO12按键扫描与QMI8658 I2C读取，本记录为原理图查证，实测阈值待联调确认。
