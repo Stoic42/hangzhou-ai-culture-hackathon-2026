@@ -218,15 +218,49 @@ static int test_v1_timeout_still_works(void)
     buddy_t buddy;
     buddy_session_t session;
     char err[BUDDY_ERR_LEN];
-    const char *json = "{\"schema_version\":1,\"buddy_id\":\"bdy_v1\",\"content_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"content\":{\"name\":\"n\",\"personality\":\"p\",\"gameplay_summary\":\"g\",\"theme_tags\":[\"t\"]},\"avatar\":{\"face\":\"round\",\"eyes\":\"sleepy\",\"mouth\":\"small\",\"palette\":[\"#112233\",\"#445566\"],\"motion_style\":\"drowsy\"},\"game\":{\"duration_sec\":2,\"initial_node\":\"start\",\"variables\":[],\"nodes\":[{\"id\":\"start\",\"title\":\"s\",\"instruction\":\"i\",\"transitions\":[]},{\"id\":\"end\",\"title\":\"e\",\"instruction\":\"i\",\"on_enter\":[{\"op\":\"game.end\",\"outcome\":\"carried_away\"}]}]},\"resources\":[]}";
+    const char *json = "{\"schema_version\":1,\"buddy_id\":\"bdy_v1\",\"content_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"content\":{\"name\":\"n\",\"personality\":\"p\",\"gameplay_summary\":\"g\",\"theme_tags\":[\"t\"]},\"avatar\":{\"face\":\"round\",\"eyes\":\"sleepy\",\"mouth\":\"small\",\"palette\":[\"#112233\",\"#445566\"],\"motion_style\":\"drowsy\"},\"game\":{\"duration_sec\":60,\"initial_node\":\"start\",\"variables\":[],\"nodes\":[{\"id\":\"start\",\"title\":\"s\",\"instruction\":\"i\",\"transitions\":[]},{\"id\":\"end\",\"title\":\"e\",\"instruction\":\"i\",\"on_enter\":[{\"op\":\"game.end\",\"outcome\":\"carried_away\"}]}]},\"resources\":[]}";
     TEST_ASSERT(buddy_parse(json, strlen(json), &buddy, err));
     buddy_session_start(&session, &buddy);
-    TEST_ASSERT_EQ(session.remaining_sec, 2);
-    buddy_session_handle(&session, BUDDY_EVENT_TIMER, NULL);
+    TEST_ASSERT_EQ(session.remaining_sec, 60);
+    for (int i = 0; i < 59; i++) {
+        buddy_session_handle(&session, BUDDY_EVENT_TIMER, NULL);
+        TEST_ASSERT_EQ(session.outcome, BUDDY_OUTCOME_NONE);
+    }
     TEST_ASSERT_EQ(session.remaining_sec, 1);
-    TEST_ASSERT_EQ(session.outcome, BUDDY_OUTCOME_NONE);
     buddy_session_handle(&session, BUDDY_EVENT_TIMER, NULL);
     TEST_ASSERT_EQ(session.outcome, BUDDY_OUTCOME_CARRIED_AWAY);
+    return 0;
+}
+
+static int test_v2_duration_ceiling(void)
+{
+    buddy_t buddy;
+    buddy_session_t session;
+    char err[BUDDY_ERR_LEN];
+    const char *json = "{\"schema_version\":2,\"buddy_id\":\"bdy_v2\",\"content_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"content\":{\"name\":\"n\",\"personality\":\"p\",\"gameplay_summary\":\"g\",\"theme_tags\":[\"t\"]},\"avatar\":{\"face\":\"round\",\"eyes\":\"sleepy\",\"mouth\":\"small\",\"palette\":[\"#112233\",\"#445566\"],\"motion_style\":\"drowsy\"},\"game\":{\"duration_sec\":60,\"initial_node\":\"start\",\"variables\":[],\"pressure\":{\"initial\":10,\"rise_per_sec\":1,\"min\":0,\"max\":100},\"quips\":{\"escaped\":[\"e\"],\"carried_away\":[\"c\"]},\"nodes\":[{\"id\":\"start\",\"title\":\"s\",\"instruction\":\"i\",\"transitions\":[]},{\"id\":\"end\",\"title\":\"e\",\"instruction\":\"i\",\"on_enter\":[{\"op\":\"game.end\",\"outcome\":\"carried_away\"}]}]},\"resources\":[]}";
+    TEST_ASSERT(buddy_parse(json, strlen(json), &buddy, err));
+    buddy_session_start(&session, &buddy);
+    for (int i = 0; i < 60; i++) {
+        TEST_ASSERT_EQ(session.outcome, BUDDY_OUTCOME_NONE);
+        buddy_session_handle(&session, BUDDY_EVENT_TIMER, NULL);
+    }
+    TEST_ASSERT_EQ(session.outcome, BUDDY_OUTCOME_CARRIED_AWAY);
+    return 0;
+}
+
+static int test_v2_no_duration_no_timeout(void)
+{
+    buddy_t buddy;
+    buddy_session_t session;
+    char err[BUDDY_ERR_LEN];
+    const char *json = "{\"schema_version\":2,\"buddy_id\":\"bdy_v2\",\"content_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"content\":{\"name\":\"n\",\"personality\":\"p\",\"gameplay_summary\":\"g\",\"theme_tags\":[\"t\"]},\"avatar\":{\"face\":\"round\",\"eyes\":\"sleepy\",\"mouth\":\"small\",\"palette\":[\"#112233\",\"#445566\"],\"motion_style\":\"drowsy\"},\"game\":{\"initial_node\":\"start\",\"variables\":[],\"pressure\":{\"initial\":50,\"rise_per_sec\":1,\"min\":0,\"max\":100},\"quips\":{\"escaped\":[\"e\"],\"carried_away\":[\"c\"]},\"nodes\":[{\"id\":\"start\",\"title\":\"s\",\"instruction\":\"i\",\"transitions\":[]},{\"id\":\"end\",\"title\":\"e\",\"instruction\":\"i\",\"on_enter\":[{\"op\":\"game.end\",\"outcome\":\"carried_away\"}]}]},\"resources\":[]}";
+    TEST_ASSERT(buddy_parse(json, strlen(json), &buddy, err));
+    buddy_session_start(&session, &buddy);
+    for (int i = 0; i < 10; i++) {
+        TEST_ASSERT_EQ(session.outcome, BUDDY_OUTCOME_NONE);
+        buddy_session_handle(&session, BUDDY_EVENT_TIMER, NULL);
+    }
+    /* pressure would end the game long before any non-existent timeout */
     return 0;
 }
 
@@ -249,6 +283,8 @@ int main(void)
         test_v1_rejects_v2_event,
         test_v1_rejects_pressure,
         test_v1_timeout_still_works,
+        test_v2_duration_ceiling,
+        test_v2_no_duration_no_timeout,
     };
     int total = sizeof(tests) / sizeof(tests[0]);
     int passed = 0;

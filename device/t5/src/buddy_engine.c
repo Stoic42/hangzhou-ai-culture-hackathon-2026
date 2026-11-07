@@ -150,31 +150,30 @@ static bool parse_condition(const cJSON *cond, buddy_t *buddy, buddy_condition_t
     out->var = -1;
 
     if (cJSON_IsObject(left)) {
+        /* require exactly one key: var / remaining_sec / pressure */
+        int key_count = cJSON_GetArraySize(left);
+        if (key_count != 1) {
+            fail(err, "condition.left must be exactly one of {var}, {remaining_sec:true}, {pressure:true}");
+            return false;
+        }
         const cJSON *var = cJSON_GetObjectItem(left, "var");
         const cJSON *remaining = cJSON_GetObjectItem(left, "remaining_sec");
         const cJSON *pressure = cJSON_GetObjectItem(left, "pressure");
-        int set_bits = 0;
         if (cJSON_IsString(var)) {
             out->var = buddy_find_var(buddy, var->valuestring);
             if (out->var < 0) {
                 fail(err, "condition uses undeclared variable");
                 return false;
             }
-            set_bits++;
-        }
-        if (cJSON_IsBool(remaining) && cJSON_IsTrue(remaining)) {
+        } else if (cJSON_IsBool(remaining) && cJSON_IsTrue(remaining)) {
             out->is_remaining = true;
-            set_bits++;
-        }
-        if (cJSON_IsBool(pressure) && cJSON_IsTrue(pressure)) {
+        } else if (cJSON_IsBool(pressure) && cJSON_IsTrue(pressure)) {
             if (buddy->schema_version < 2) {
                 fail(err, "pressure condition requires schema_version 2");
                 return false;
             }
             out->is_pressure = true;
-            set_bits++;
-        }
-        if (set_bits != 1) {
+        } else {
             fail(err, "condition.left must be exactly one of {var}, {remaining_sec:true}, {pressure:true}");
             return false;
         }
@@ -292,7 +291,12 @@ static bool parse_actions(const cJSON *actions, buddy_t *buddy, buddy_action_t *
                 fail(err, "pressure.adjust value must be an integer");
                 return false;
             }
-            dst->int_value = (int)value->valuedouble;
+            int v = (int)value->valuedouble;
+            if (v < -PRESSURE_MAX_BOUND || v > PRESSURE_MAX_BOUND) {
+                fail(err, "pressure.adjust value magnitude must be <= 1000");
+                return false;
+            }
+            dst->int_value = v;
         } else {
             fail(err, "action op not in whitelist");
             return false;
@@ -512,8 +516,8 @@ bool buddy_parse(const char *json, uint32_t json_len, buddy_t *out, char *err)
             out->pressure.max = (int)p_max->valuedouble;
             if (out->pressure.min < PRESSURE_MIN_BOUND || out->pressure.max > PRESSURE_MAX_BOUND ||
                 !(out->pressure.min < out->pressure.initial && out->pressure.initial < out->pressure.max) ||
-                out->pressure.rise_per_sec < 1) {
-                fail(err, "pressure must satisfy 0<=min<initial<max<=1000 and rise_per_sec>=1");
+                out->pressure.rise_per_sec < 1 || out->pressure.rise_per_sec > PRESSURE_MAX_BOUND) {
+                fail(err, "pressure must satisfy 0<=min<initial<max<=1000 and 1<=rise_per_sec<=1000");
                 goto end;
             }
 

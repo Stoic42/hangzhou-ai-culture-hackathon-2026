@@ -62,7 +62,9 @@ class BuddyGame:
             r["resource_id"] for r in preset.get("resources", [])
         }
         if self.schema_version >= 2:
-            self.pressure_cfg = game["pressure"]
+            self.pressure_cfg = game.get("pressure")
+            if self.pressure_cfg is None:
+                raise SimulationError("schema_version 2 requires game.pressure")
         else:
             self.pressure_cfg = None
         self.reset()
@@ -217,8 +219,10 @@ class BuddyGame:
         return self.node_id, self.outcome
 
     def timeout(self):
+        """Run until the global duration ceiling expires (v1 or v2 with duration_sec).
+        For v2 packs without duration_sec this only advances one tick; use advance()
+        to run a specific number of seconds."""
         if self.duration_sec <= 0:
-            # v2 without fallback ceiling: just advance one tick to let pressure erode
             return self.dispatch(TIMER_ELAPSED)
         while not self.ended and self.elapsed < self.duration_sec:
             self.dispatch(TIMER_ELAPSED)

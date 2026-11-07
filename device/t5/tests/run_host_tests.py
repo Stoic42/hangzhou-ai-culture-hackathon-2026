@@ -71,7 +71,7 @@ def compile_with_host_compiler(compiler: Path, cjson_dir: Path, out: Path) -> bo
 
 
 def cross_compile_syntax_check(cjson_dir: Path) -> bool:
-    """Use the TuyaOpen ARM GCC to at least verify the C sources compile."""
+    """Use the TuyaOpen ARM GCC to verify both engine and test sources compile."""
     arm_gcc_candidates = [
         Path("/f/t5open/platform/tools/gcc-arm-none-eabi-10.3-2021.10/bin/arm-none-eabi-gcc.exe"),
         Path("F:/t5open/platform/tools/gcc-arm-none-eabi-10.3-2021.10/bin/arm-none-eabi-gcc.exe"),
@@ -85,24 +85,30 @@ def cross_compile_syntax_check(cjson_dir: Path) -> bool:
         print("No host compiler and no ARM cross compiler found; cannot verify C sources.")
         return False
 
-    cmd = [
-        str(arm_gcc),
-        "-c",
-        str(T5_SRC / "buddy_engine.c"),
-        f"-I{cjson_dir}",
-        f"-I{T5_SRC}",
-        "-o", str(T5_TESTS / "buddy_engine.o"),
+    files = [
+        ("buddy_engine", T5_SRC / "buddy_engine.c"),
+        ("test_buddy_engine", T5_TESTS / "test_buddy_engine.c"),
     ]
     print("No host compiler available; running ARM cross-compile syntax check:")
-    print(" ".join(cmd))
-    proc = subprocess.run(cmd, capture_output=True, text=True)
-    if T5_TESTS.joinpath("buddy_engine.o").exists():
-        T5_TESTS.joinpath("buddy_engine.o").unlink()
-    if proc.returncode != 0:
-        print("Cross-compile failed:")
-        print(proc.stdout)
-        print(proc.stderr)
-        return False
+    for label, src in files:
+        out = T5_TESTS / f"{label}.o"
+        cmd = [
+            str(arm_gcc),
+            "-c",
+            str(src),
+            f"-I{cjson_dir}",
+            f"-I{T5_SRC}",
+            "-o", str(out),
+        ]
+        print(" ".join(cmd))
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if out.exists():
+            out.unlink()
+        if proc.returncode != 0:
+            print(f"Cross-compile failed for {label}:")
+            print(proc.stdout)
+            print(proc.stderr)
+            return False
     print("ARM cross-compile syntax check passed (warnings are expected).")
     return True
 

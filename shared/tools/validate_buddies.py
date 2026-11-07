@@ -139,8 +139,8 @@ def validate_manifest(data: object) -> list[str]:
             else:
                 if not (PRESSURE_MIN_BOUND <= p_min < p_initial < p_max <= PRESSURE_MAX_BOUND):
                     err("pressure必须满足0<=min<initial<max<=1000")
-                if p_rise < 1:
-                    err("pressure.rise_per_sec必须>=1")
+                if p_rise < 1 or p_rise > PRESSURE_MAX_BOUND:
+                    err("pressure.rise_per_sec必须满足1<=rise_per_sec<=1000")
 
         quips = game.get("quips")
         if not isinstance(quips, dict):
@@ -347,8 +347,6 @@ def validate_manifest(data: object) -> list[str]:
     for action in all_actions:
         if action.get("op") == "audio.play" and action.get("resource_id") not in resource_ids:
             err(f"audio.play引用未声明资源{action.get('resource_id')!r}")
-        if schema_version == 1 and action.get("op") == "pressure.adjust":
-            err("v1包不能使用pressure.adjust")
 
     return errors
 
@@ -432,6 +430,8 @@ def _check_actions(actions: object, var_names: set[str], schema_version: int, wh
                 err(f"{loc}的pressure.adjust需要schema_version 2")
             if not _is_int(action.get("value")):
                 err(f"{loc}的pressure.adjust value必须是整数")
+            elif abs(action["value"]) > PRESSURE_MAX_BOUND:
+                err(f"{loc}的pressure.adjust value绝对值必须<=1000")
 
 
 def iter_manifest_files(root: Path) -> list[Path]:

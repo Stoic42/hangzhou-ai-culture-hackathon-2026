@@ -209,8 +209,10 @@ typedef struct {
 void buddy_session_start(buddy_session_t *session, const buddy_t *buddy);
 
 /** Feed an event with a millisecond tick. Timer events are handled
- * before touch events by the caller. When the global countdown reaches 0 the
- * session is forced into the carried_away ending regardless of rules.
+ * before touch events by the caller. For schema_version 2, timer ticks also
+ * raise pressure by rise_per_sec; reaching max/min forces carried_away/escaped.
+ * When the global countdown (v1 or v2 with duration_sec) reaches 0 the session
+ * is forced into the carried_away ending regardless of rules.
  * Returns true when the node changed or the session ended. */
 bool buddy_session_handle_ex(buddy_session_t *session, buddy_event_t event,
                              const buddy_session_ops_t *ops, uint32_t now_ms);

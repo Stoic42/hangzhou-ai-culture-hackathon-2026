@@ -287,6 +287,35 @@ class V2NegativeCasesTest(unittest.TestCase):
             d["game"]["pressure"]["rise_per_sec"] = 0
         self.check(mutate, "rise_per_sec")
 
+    def test_pressure_rise_too_large(self):
+        def mutate(d):
+            d["game"]["pressure"]["rise_per_sec"] = 1001
+        self.check(mutate, "rise_per_sec")
+
+    def test_pressure_adjust_value_too_large(self):
+        def mutate(d):
+            d["game"]["nodes"][0]["transitions"][0]["actions"].append(
+                {"op": "pressure.adjust", "value": 1001})
+        self.check(mutate, "绝对值")
+
+    def test_pressure_adjust_negative_value_too_large(self):
+        def mutate(d):
+            d["game"]["nodes"][0]["transitions"][0]["actions"].append(
+                {"op": "pressure.adjust", "value": -1001})
+        self.check(mutate, "绝对值")
+
+    def test_condition_left_strict_one_key(self):
+        def mutate(d):
+            d["game"]["nodes"][0]["transitions"][2]["condition"]["left"] = {
+                "var": "pushes", "remaining_sec": False}
+        self.check(mutate, "condition.left")
+
+    def test_condition_left_false_remaining_sec(self):
+        def mutate(d):
+            d["game"]["nodes"][0]["transitions"][2]["condition"]["left"] = {
+                "remaining_sec": False}
+        self.check(mutate, "condition.left")
+
     def test_quips_empty_side(self):
         def mutate(d):
             d["game"]["quips"]["escaped"] = []
