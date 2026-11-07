@@ -479,74 +479,88 @@ bool buddy_parse(const char *json, uint32_t json_len, buddy_t *out, char *err)
         }
     }
 
-    /* v2 pressure and quips */
-    if (out->schema_version >= 2) {
+    /* v2 pressure and quips (v1 must not contain them) */
+    {
         const cJSON *pressure = cJSON_GetObjectItem(game, "pressure");
-        if (!cJSON_IsObject(pressure)) {
-            fail(err, "game.pressure must be an object");
-            goto end;
-        }
-        const cJSON *p_initial = cJSON_GetObjectItem(pressure, "initial");
-        const cJSON *p_rise = cJSON_GetObjectItem(pressure, "rise_per_sec");
-        const cJSON *p_min = cJSON_GetObjectItem(pressure, "min");
-        const cJSON *p_max = cJSON_GetObjectItem(pressure, "max");
-        if (!cjson_is_int(p_initial) || !cjson_is_int(p_rise) ||
-            !cjson_is_int(p_min) || !cjson_is_int(p_max)) {
-            fail(err, "pressure fields must be integers");
-            goto end;
-        }
-        out->pressure.initial = (int)p_initial->valuedouble;
-        out->pressure.rise_per_sec = (int)p_rise->valuedouble;
-        out->pressure.min = (int)p_min->valuedouble;
-        out->pressure.max = (int)p_max->valuedouble;
-        if (out->pressure.min < PRESSURE_MIN_BOUND || out->pressure.max > PRESSURE_MAX_BOUND ||
-            !(out->pressure.min < out->pressure.initial && out->pressure.initial < out->pressure.max) ||
-            out->pressure.rise_per_sec < 1) {
-            fail(err, "pressure must satisfy 0<=min<initial<max<=1000 and rise_per_sec>=1");
-            goto end;
-        }
-
         const cJSON *quips = cJSON_GetObjectItem(game, "quips");
-        if (!cJSON_IsObject(quips)) {
-            fail(err, "game.quips must be an object");
-            goto end;
-        }
-        const char *quip_keys[] = {"escaped", "carried_away"};
-        uint8_t *quip_counts[] = {&out->quips.escaped_count, &out->quips.carried_away_count};
-        const char **quip_slots[] = {out->quips.escaped, out->quips.carried_away};
-        for (int q = 0; q < 2; q++) {
-            const cJSON *arr = cJSON_GetObjectItem(quips, quip_keys[q]);
-            if (!cJSON_IsArray(arr)) {
-                fail(err, "game.quips must contain escaped and carried_away arrays");
+        if (out->schema_version == 1) {
+            if (pressure != NULL) {
+                fail(err, "schema_version 1 must not contain game.pressure");
                 goto end;
             }
-            uint8_t count = 0;
-            const cJSON *item = NULL;
-            cJSON_ArrayForEach(item, arr)
-            {
-                if (!cJSON_IsString(item) || item->valuestring[0] == '\0' ||
-                    count >= BUDDY_MAX_QUIPS) {
-                    fail(err, "quips must be non-empty strings");
+            if (quips != NULL) {
+                fail(err, "schema_version 1 must not contain game.quips");
+                goto end;
+            }
+        } else {
+            if (!cJSON_IsObject(pressure)) {
+                fail(err, "game.pressure must be an object");
+                goto end;
+            }
+            const cJSON *p_initial = cJSON_GetObjectItem(pressure, "initial");
+            const cJSON *p_rise = cJSON_GetObjectItem(pressure, "rise_per_sec");
+            const cJSON *p_min = cJSON_GetObjectItem(pressure, "min");
+            const cJSON *p_max = cJSON_GetObjectItem(pressure, "max");
+            if (!cjson_is_int(p_initial) || !cjson_is_int(p_rise) ||
+                !cjson_is_int(p_min) || !cjson_is_int(p_max)) {
+                fail(err, "pressure fields must be integers");
+                goto end;
+            }
+            out->pressure.initial = (int)p_initial->valuedouble;
+            out->pressure.rise_per_sec = (int)p_rise->valuedouble;
+            out->pressure.min = (int)p_min->valuedouble;
+            out->pressure.max = (int)p_max->valuedouble;
+            if (out->pressure.min < PRESSURE_MIN_BOUND || out->pressure.max > PRESSURE_MAX_BOUND ||
+                !(out->pressure.min < out->pressure.initial && out->pressure.initial < out->pressure.max) ||
+                out->pressure.rise_per_sec < 1) {
+                fail(err, "pressure must satisfy 0<=min<initial<max<=1000 and rise_per_sec>=1");
+                goto end;
+            }
+
+            if (!cJSON_IsObject(quips)) {
+                fail(err, "game.quips must be an object");
+                goto end;
+            }
+            const char *quip_keys[] = {"escaped", "carried_away"};
+            uint8_t *quip_counts[] = {&out->quips.escaped_count, &out->quips.carried_away_count};
+            const char **quip_slots[] = {out->quips.escaped, out->quips.carried_away};
+            for (int q = 0; q < 2; q++) {
+                const cJSON *arr = cJSON_GetObjectItem(quips, quip_keys[q]);
+                if (!cJSON_IsArray(arr)) {
+                    fail(err, "game.quips must contain escaped and carried_away arrays");
                     goto end;
                 }
-                size_t len = strlen(item->valuestring);
-                /* UTF-8 codepoint count: simple skip continuation bytes */
-                size_t cp = 0;
-                for (size_t i = 0; i < len; i++) {
-                    if ((item->valuestring[i] & 0xC0) != 0x80) {
-                        cp++;
+                uint8_t count = 0;
+                const cJSON *item = NULL;
+                cJSON_ArrayForEach(item, arr)
+                {
+                    if (!cJSON_IsString(item) || item->valuestring[0] == '\0') {
+                        fail(err, "quips must be non-empty strings");
+                        goto end;
                     }
+                    if (count >= BUDDY_MAX_QUIPS) {
+                        fail(err, "quips list must contain at most 4 strings");
+                        goto end;
+                    }
+                    size_t len = strlen(item->valuestring);
+                    /* UTF-8 codepoint count: simple skip continuation bytes */
+                    size_t cp = 0;
+                    for (size_t i = 0; i < len; i++) {
+                        if ((item->valuestring[i] & 0xC0) != 0x80) {
+                            cp++;
+                        }
+                    }
+                    if (cp < 1 || cp > 40) {
+                        fail(err, "quip must be 1-40 UTF-8 characters");
+                        goto end;
+                    }
+                    quip_slots[q][count++] = item->valuestring;
                 }
-                if (cp < 1 || cp > 40) {
-                    fail(err, "quip must be 1-40 UTF-8 characters");
+                *quip_counts[q] = count;
+                if (count < 1) {
+                    fail(err, "quips list must contain at least one string");
                     goto end;
                 }
-                quip_slots[q][count++] = item->valuestring;
-            }
-            *quip_counts[q] = count;
-            if (count < 1) {
-                fail(err, "quips list must contain at least one string");
-                goto end;
             }
         }
     }
