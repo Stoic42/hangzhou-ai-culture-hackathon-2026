@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "buddy_id": "bdy_preset_do_now",
   "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
   "content": {
@@ -16,25 +16,39 @@
     "motion_style": "bouncy"
   },
   "game": {
-    "duration_sec": 70,
+    "duration_sec": 120,
     "initial_node": "nudge",
     "variables": [{ "name": "actions_done", "type": "int", "initial": 0 }],
+    "pressure": { "initial": 60, "rise_per_sec": 2, "min": 0, "max": 100 },
+    "quips": {
+      "escaped": [
+        "行动力满格，开工！",
+        "拖延怪被你甩掉了。",
+        "现在就做，感觉真好。"
+      ],
+      "carried_away": [
+        "明天一定？明天再说。",
+        "它最擅长等下一分钟。",
+        "事情又拖过了一天。"
+      ]
+    },
     "nodes": [
       {
         "id": "nudge",
         "title": "现在做",
         "instruction": "滑动开始行动；点按又会拖住你",
         "on_enter": [
-        { "op": "avatar.expression", "value": "anxious" },
-        { "op": "audio.play", "resource_id": "feedback" }
-      ],
+          { "op": "avatar.expression", "value": "anxious" },
+          { "op": "audio.play", "resource_id": "feedback" }
+        ],
         "transitions": [
           {
             "event": "touch.swipe",
             "to": "acting",
             "actions": [
               { "op": "var.increment", "name": "actions_done", "value": 1 },
-              { "op": "avatar.expression", "value": "happy" }
+              { "op": "avatar.expression", "value": "happy" },
+              { "op": "pressure.adjust", "value": -20 }
             ]
           },
           {
@@ -42,7 +56,8 @@
             "to": "nudge",
             "actions": [
               { "op": "var.set", "name": "actions_done", "value": 0 },
-              { "op": "avatar.expression", "value": "smug" }
+              { "op": "avatar.expression", "value": "smug" },
+              { "op": "pressure.adjust", "value": 10 }
             ]
           }
         ]
@@ -57,19 +72,27 @@
             "event": "touch.swipe",
             "condition": { "left": { "var": "actions_done" }, "op": "gte", "right": 2 },
             "to": "escaped_node",
-            "actions": [{ "op": "game.end", "outcome": "escaped" }]
+            "actions": [
+              { "op": "game.end", "outcome": "escaped" },
+              { "op": "var.increment", "name": "actions_done", "value": 1 },
+              { "op": "pressure.adjust", "value": -20 }
+            ]
           },
           {
             "event": "touch.swipe",
             "to": "acting",
-            "actions": [{ "op": "var.increment", "name": "actions_done", "value": 1 }]
+            "actions": [
+              { "op": "var.increment", "name": "actions_done", "value": 1 },
+              { "op": "pressure.adjust", "value": -20 }
+            ]
           },
           {
             "event": "touch.tap",
             "to": "nudge",
             "actions": [
               { "op": "var.set", "name": "actions_done", "value": 0 },
-              { "op": "avatar.expression", "value": "angry" }
+              { "op": "avatar.expression", "value": "angry" },
+              { "op": "pressure.adjust", "value": 10 }
             ]
           }
         ]
@@ -86,9 +109,9 @@
         "title": "被搭子带跑",
         "instruction": "事情又拖过了一天",
         "on_enter": [
-        { "op": "avatar.expression", "value": "sleepy" },
-        { "op": "game.end", "outcome": "carried_away" }
-      ],
+          { "op": "avatar.expression", "value": "sleepy" },
+          { "op": "game.end", "outcome": "carried_away" }
+        ],
         "transitions": []
       }
     ]

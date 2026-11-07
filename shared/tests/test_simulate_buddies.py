@@ -172,6 +172,47 @@ class SimulateBuddiesTest(unittest.TestCase):
         g.timeout()
         self.assertEqual(g.outcome, "carried_away")
 
+    # ---- new v2 presets -----------------------------------------------
+    def test_swipe_duel_three_correct_swipes_escape(self):
+        g = self._game("swipe-duel.json")
+        g.dispatch(SWIPE_LEFT)
+        g.dispatch(SWIPE_RIGHT)
+        g.dispatch(SWIPE_LEFT)
+        self.assertEqual(g.outcome, "escaped")
+
+    def test_swipe_duel_wrong_direction_loses(self):
+        g = self._game("swipe-duel.json")
+        g.dispatch(SWIPE_RIGHT)
+        g.dispatch(SWIPE_RIGHT)
+        g.advance(60)
+        self.assertEqual(g.outcome, "carried_away")
+
+    def test_rhythm_tap_rapid_taps_escape(self):
+        g = self._game("rhythm-tap.json")
+        for ms in range(100, 1000, 100):
+            g.dispatch(TAP, now_ms=ms)
+        self.assertEqual(g.outcome, "escaped")
+
+    def test_rhythm_tap_slow_taps_lose(self):
+        g = self._game("rhythm-tap.json")
+        for ms in (100, 600, 1100, 1600):
+            g.dispatch(TAP, now_ms=ms)
+        g.advance(120)
+        self.assertEqual(g.outcome, "carried_away")
+
+    def test_shake_off_five_shakes_escape(self):
+        g = self._game("shake-off.json")
+        for _ in range(5):
+            g.dispatch(SHAKE)
+        self.assertEqual(g.outcome, "escaped")
+
+    def test_shake_off_tapping_loses(self):
+        g = self._game("shake-off.json")
+        for _ in range(3):
+            g.dispatch(TAP)
+        g.advance(60)
+        self.assertEqual(g.outcome, "carried_away")
+
     # ---- reset ---------------------------------------------------------
     def test_reset_restores_variables_node_countdown_outcome(self):
         g = self._game("do-now.json")

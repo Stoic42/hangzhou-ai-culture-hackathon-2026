@@ -101,7 +101,10 @@ class PresetsValidTest(unittest.TestCase):
 
     def test_preset_files_exist(self):
         names = {p.name for p in vb.iter_manifest_files(PRESETS_DIR)}
-        self.assertEqual(names, {"last-one.json", "do-now.json", "decide-now.json"})
+        self.assertEqual(names, {
+            "last-one.json", "do-now.json", "decide-now.json",
+            "swipe-duel.json", "rhythm-tap.json", "shake-off.json",
+        })
 
 
 class V2ValidTest(unittest.TestCase):
@@ -141,7 +144,7 @@ class NegativeCasesTest(unittest.TestCase):
         self.check(lambda d: d["game"].update(duration_sec=59), "duration_sec")
 
     def test_bad_duration_too_long(self):
-        self.check(lambda d: d["game"].update(duration_sec=91), "duration_sec")
+        self.check(lambda d: d["game"].update(duration_sec=181), "duration_sec")
 
     def test_unknown_event(self):
         self.check(lambda d: d["game"]["nodes"][0]["transitions"][0].update(

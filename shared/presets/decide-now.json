@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "buddy_id": "bdy_preset_decide_now",
   "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
   "content": {
@@ -16,28 +16,47 @@
     "motion_style": "jittery"
   },
   "game": {
-    "duration_sec": 65,
+    "duration_sec": 120,
     "initial_node": "offer_a",
     "variables": [{ "name": "locks", "type": "int", "initial": 0 }],
+    "pressure": { "initial": 60, "rise_per_sec": 2, "min": 0, "max": 100 },
+    "quips": {
+      "escaped": [
+        "你终于定了，真不容易。",
+        "选择困难？这次没有。",
+        "果断的样子最帅。"
+      ],
+      "carried_away": [
+        "A还是B？明天再想。",
+        "它最喜欢看你犹豫。",
+        "你什么都没选成。"
+      ]
+    },
     "nodes": [
       {
         "id": "offer_a",
         "title": "选A还是B",
         "instruction": "点按看看B；滑动锁定A",
         "on_enter": [
-        { "op": "avatar.expression", "value": "neutral" },
-        { "op": "audio.play", "resource_id": "feedback" }
-      ],
+          { "op": "avatar.expression", "value": "neutral" },
+          { "op": "audio.play", "resource_id": "feedback" }
+        ],
         "transitions": [
           {
             "event": "touch.tap",
             "to": "offer_b",
-            "actions": [{ "op": "avatar.expression", "value": "anxious" }]
+            "actions": [
+              { "op": "avatar.expression", "value": "anxious" },
+              { "op": "pressure.adjust", "value": 10 }
+            ]
           },
           {
             "event": "touch.swipe",
             "to": "locked",
-            "actions": [{ "op": "var.increment", "name": "locks", "value": 1 }]
+            "actions": [
+              { "op": "var.increment", "name": "locks", "value": 1 },
+              { "op": "pressure.adjust", "value": -30 }
+            ]
           }
         ]
       },
@@ -50,12 +69,18 @@
           {
             "event": "touch.tap",
             "to": "offer_a",
-            "actions": [{ "op": "avatar.expression", "value": "sleepy" }]
+            "actions": [
+              { "op": "avatar.expression", "value": "sleepy" },
+              { "op": "pressure.adjust", "value": 10 }
+            ]
           },
           {
             "event": "touch.swipe",
             "to": "locked",
-            "actions": [{ "op": "var.increment", "name": "locks", "value": 1 }]
+            "actions": [
+              { "op": "var.increment", "name": "locks", "value": 1 },
+              { "op": "pressure.adjust", "value": -30 }
+            ]
           }
         ]
       },
@@ -69,17 +94,27 @@
             "event": "touch.swipe",
             "condition": { "left": { "var": "locks" }, "op": "gte", "right": 1 },
             "to": "escaped_node",
-            "actions": [{ "op": "game.end", "outcome": "escaped" }]
+            "actions": [
+              { "op": "game.end", "outcome": "escaped" },
+              { "op": "var.increment", "name": "locks", "value": 1 },
+              { "op": "pressure.adjust", "value": -30 }
+            ]
           },
           {
             "event": "touch.swipe",
             "to": "locked",
-            "actions": [{ "op": "var.increment", "name": "locks", "value": 1 }]
+            "actions": [
+              { "op": "var.increment", "name": "locks", "value": 1 },
+              { "op": "pressure.adjust", "value": -30 }
+            ]
           },
           {
             "event": "touch.tap",
             "to": "offer_a",
-            "actions": [{ "op": "avatar.expression", "value": "smug" }]
+            "actions": [
+              { "op": "avatar.expression", "value": "smug" },
+              { "op": "pressure.adjust", "value": 10 }
+            ]
           }
         ]
       },
@@ -95,9 +130,9 @@
         "title": "被搭子带跑",
         "instruction": "你什么都没选成",
         "on_enter": [
-        { "op": "avatar.expression", "value": "anxious" },
-        { "op": "game.end", "outcome": "carried_away" }
-      ],
+          { "op": "avatar.expression", "value": "anxious" },
+          { "op": "game.end", "outcome": "carried_away" }
+        ],
         "transitions": []
       }
     ]

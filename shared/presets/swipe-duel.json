@@ -1,0 +1,149 @@
+{
+  "schema_version": 2,
+  "buddy_id": "bdy_preset_swipe_duel",
+  "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "content": {
+    "name": "方向推推",
+    "personality": "蛮横不讲理，专从死角逼近",
+    "gameplay_summary": "妖怪从左右两侧逼近，朝提示方向滑动把它推回，推回3次即可脱身",
+    "theme_tags": ["方向感", "对抗"]
+  },
+  "avatar": {
+    "face": "square",
+    "eyes": "wide",
+    "mouth": "grin",
+    "palette": ["#E76F51", "#264653"],
+    "motion_style": "bouncy"
+  },
+  "game": {
+    "duration_sec": 120,
+    "initial_node": "duel_left",
+    "variables": [{ "name": "pushes", "type": "int", "initial": 0 }],
+    "pressure": { "initial": 60, "rise_per_sec": 2, "min": 0, "max": 100 },
+    "quips": {
+      "escaped": [
+        "三连推，妖怪出界！",
+        "方向感在线，漂亮。",
+        "它被你推回了角落。"
+      ],
+      "carried_away": [
+        "方向全反，正中它下怀。",
+        "被推得连连后退。",
+        "下次看准箭头再滑。"
+      ]
+    },
+    "nodes": [
+      {
+        "id": "duel_left",
+        "title": "左边来了",
+        "instruction": "妖怪从左边逼近，向左滑把它推回去",
+        "on_enter": [
+          { "op": "avatar.expression", "value": "angry" },
+          { "op": "audio.play", "resource_id": "feedback" }
+        ],
+        "transitions": [
+          {
+            "event": "touch.swipe_left",
+            "condition": { "left": { "var": "pushes" }, "op": "gte", "right": 2 },
+            "to": "escaped_node",
+            "actions": [
+              { "op": "game.end", "outcome": "escaped" },
+              { "op": "var.increment", "name": "pushes", "value": 1 },
+              { "op": "pressure.adjust", "value": -20 }
+            ]
+          },
+          {
+            "event": "touch.swipe_left",
+            "to": "duel_right",
+            "actions": [
+              { "op": "var.increment", "name": "pushes", "value": 1 },
+              { "op": "pressure.adjust", "value": -20 }
+            ]
+          },
+          {
+            "event": "touch.swipe_right",
+            "to": "duel_left",
+            "actions": [
+              { "op": "avatar.expression", "value": "smug" },
+              { "op": "pressure.adjust", "value": 10 }
+            ]
+          },
+          {
+            "event": "touch.tap",
+            "to": "duel_left",
+            "actions": [
+              { "op": "pressure.adjust", "value": 10 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "duel_right",
+        "title": "右边来了",
+        "instruction": "它绕到右边了，向右滑把它推回去",
+        "on_enter": [{ "op": "avatar.motion", "value": "shake" }],
+        "transitions": [
+          {
+            "event": "touch.swipe_right",
+            "condition": { "left": { "var": "pushes" }, "op": "gte", "right": 2 },
+            "to": "escaped_node",
+            "actions": [
+              { "op": "game.end", "outcome": "escaped" },
+              { "op": "var.increment", "name": "pushes", "value": 1 },
+              { "op": "pressure.adjust", "value": -20 }
+            ]
+          },
+          {
+            "event": "touch.swipe_right",
+            "to": "duel_left",
+            "actions": [
+              { "op": "var.increment", "name": "pushes", "value": 1 },
+              { "op": "pressure.adjust", "value": -20 }
+            ]
+          },
+          {
+            "event": "touch.swipe_left",
+            "to": "duel_right",
+            "actions": [
+              { "op": "avatar.expression", "value": "smug" },
+              { "op": "pressure.adjust", "value": 10 }
+            ]
+          },
+          {
+            "event": "touch.tap",
+            "to": "duel_right",
+            "actions": [
+              { "op": "pressure.adjust", "value": 10 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "escaped_node",
+        "title": "破解成功",
+        "instruction": "你把妖怪推回了屏幕外",
+        "on_enter": [{ "op": "avatar.expression", "value": "happy" }],
+        "transitions": []
+      },
+      {
+        "id": "carried_node",
+        "title": "被搭子带跑",
+        "instruction": "你被挤到了墙角",
+        "on_enter": [
+          { "op": "avatar.expression", "value": "sleepy" },
+          { "op": "game.end", "outcome": "carried_away" }
+        ],
+        "transitions": []
+      }
+    ]
+  },
+  "resources": [
+    {
+      "resource_id": "feedback",
+      "kind": "audio",
+      "url": "builtin://feedback",
+      "sha256": "a1c99febd637eb63b9d34580eff2147ed37b6ac1641f264519b2f0cb0c8cef90",
+      "size": 3200
+    }
+  ]
+}

@@ -27,7 +27,14 @@ DEVICE_DIR = Path(__file__).resolve().parent.parent
 REPO_ROOT = DEVICE_DIR.parent.parent
 SRC_DIR = DEVICE_DIR / "src"
 OUT_DIR = SRC_DIR / "generated"
-PRESET_ORDER = ["last-one.json", "do-now.json", "decide-now.json"]
+PRESET_ORDER = [
+    "last-one.json",
+    "do-now.json",
+    "decide-now.json",
+    "swipe-duel.json",
+    "rhythm-tap.json",
+    "shake-off.json",
+]
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--sdk", default=r"F:\t5open", help="TuyaOpen SDK path")

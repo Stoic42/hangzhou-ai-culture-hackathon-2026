@@ -292,10 +292,49 @@ def check_decide_now(preset):
     return results
 
 
+def check_swipe_duel(preset):
+    results = []
+    ok, detail = run_script(BuddyGame(preset),
+                            [SWIPE_LEFT, SWIPE_RIGHT, SWIPE_LEFT], "escaped")
+    results.append(("3 correct directional swipes -> escaped", ok, detail))
+    ok, detail = run_script(BuddyGame(preset),
+                            [SWIPE_RIGHT, SWIPE_RIGHT, SWIPE_RIGHT], "carried_away",
+                            via_timeout=True)
+    results.append(("wrong direction until pressure max -> carried_away", ok, detail))
+    return results
+
+
+def check_rhythm_tap(preset):
+    results = []
+    steps = [(TAP, ms) for ms in range(100, 1000, 100)]
+    ok, detail = run_script(BuddyGame(preset), steps, "escaped")
+    results.append(("9 rapid taps -> escaped", ok, detail))
+    # slow taps never trigger rapid_tap and slowly lose
+    ok, detail = run_script(BuddyGame(preset),
+                            [(TAP, 100), (TAP, 600), (TAP, 1100), (TAP, 1600)],
+                            "carried_away", via_timeout=True)
+    results.append(("slow taps -> carried_away", ok, detail))
+    return results
+
+
+def check_shake_off(preset):
+    results = []
+    ok, detail = run_script(BuddyGame(preset),
+                            [SHAKE, SHAKE, SHAKE, SHAKE, SHAKE], "escaped")
+    results.append(("5x shake -> escaped", ok, detail))
+    ok, detail = run_script(BuddyGame(preset),
+                            [TAP, TAP, TAP], "carried_away", via_timeout=True)
+    results.append(("tapping until pressure max -> carried_away", ok, detail))
+    return results
+
+
 CHECKERS = {
     "last-one.json": check_last_one,
     "do-now.json": check_do_now,
     "decide-now.json": check_decide_now,
+    "swipe-duel.json": check_swipe_duel,
+    "rhythm-tap.json": check_rhythm_tap,
+    "shake-off.json": check_shake_off,
 }
 
 

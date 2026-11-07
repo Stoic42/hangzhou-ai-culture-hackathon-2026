@@ -19,6 +19,9 @@ typedef struct {
 extern const char BUDDY_PRESET_LAST_ONE_JSON[];
 extern const char BUDDY_PRESET_DO_NOW_JSON[];
 extern const char BUDDY_PRESET_DECIDE_NOW_JSON[];
+extern const char BUDDY_PRESET_SWIPE_DUEL_JSON[];
+extern const char BUDDY_PRESET_RHYTHM_TAP_JSON[];
+extern const char BUDDY_PRESET_SHAKE_OFF_JSON[];
 
 extern const buddy_preset_desc_t BUDDY_BUILTIN_PRESETS[];
 extern const uint32_t BUDDY_BUILTIN_PRESET_COUNT;

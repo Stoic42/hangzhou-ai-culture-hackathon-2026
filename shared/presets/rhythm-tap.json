@@ -1,0 +1,100 @@
+{
+  "schema_version": 2,
+  "buddy_id": "bdy_preset_rhythm_tap",
+  "content_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "content": {
+    "name": "连点节拍",
+    "personality": "节奏控，一停顿就反扑",
+    "gameplay_summary": "在连击窗口内快速点击，累积连击把妖怪节奏打断；达到8次连击即可大胜",
+    "theme_tags": ["节奏", "手速"]
+  },
+  "avatar": {
+    "face": "round",
+    "eyes": "dot",
+    "mouth": "open",
+    "palette": ["#9B5DE5", "#00BBF9"],
+    "motion_style": "jittery"
+  },
+  "game": {
+    "duration_sec": 120,
+    "initial_node": "rhythm",
+    "variables": [{ "name": "taps", "type": "int", "initial": 0 }],
+    "pressure": { "initial": 120, "rise_per_sec": 3, "min": 0, "max": 200 },
+    "quips": {
+      "escaped": [
+        "节奏不断，妖怪退散！",
+        "手速王者，连击满分。",
+        "它跟不上你的拍子了。"
+      ],
+      "carried_away": [
+        "一停手，它就占了上风。",
+        "节奏乱了，全盘皆输。",
+        "下次记得别松劲。"
+      ]
+    },
+    "nodes": [
+      {
+        "id": "rhythm",
+        "title": "连点节拍",
+        "instruction": "快速连续点击，别让它找回节奏",
+        "on_enter": [
+          { "op": "avatar.expression", "value": "anxious" },
+          { "op": "audio.play", "resource_id": "feedback" }
+        ],
+        "transitions": [
+          {
+            "event": "touch.rapid_tap",
+            "condition": { "left": { "var": "taps" }, "op": "gte", "right": 7 },
+            "to": "escaped_node",
+            "actions": [
+              { "op": "game.end", "outcome": "escaped" },
+              { "op": "var.increment", "name": "taps", "value": 1 },
+              { "op": "pressure.adjust", "value": -15 }
+            ]
+          },
+          {
+            "event": "touch.rapid_tap",
+            "to": "rhythm",
+            "actions": [
+              { "op": "var.increment", "name": "taps", "value": 1 },
+              { "op": "pressure.adjust", "value": -15 }
+            ]
+          },
+          {
+            "event": "touch.tap",
+            "to": "rhythm",
+            "actions": [
+              { "op": "pressure.adjust", "value": 2 }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "escaped_node",
+        "title": "破解成功",
+        "instruction": "你打乱了它的节奏",
+        "on_enter": [{ "op": "avatar.expression", "value": "happy" }],
+        "transitions": []
+      },
+      {
+        "id": "carried_node",
+        "title": "被搭子带跑",
+        "instruction": "节奏一断，它卷土重来",
+        "on_enter": [
+          { "op": "avatar.expression", "value": "sleepy" },
+          { "op": "game.end", "outcome": "carried_away" }
+        ],
+        "transitions": []
+      }
+    ]
+  },
+  "resources": [
+    {
+      "resource_id": "feedback",
+      "kind": "audio",
+      "url": "builtin://feedback",
+      "sha256": "a1c99febd637eb63b9d34580eff2147ed37b6ac1641f264519b2f0cb0c8cef90",
+      "size": 3200
+    }
+  ]
+}
