@@ -1,7 +1,7 @@
-"""规则包v1静态校验器（主机端，Python 3.12标准库）。
+"""规则包v1/v2静态校验器（主机端，Python 3标准库）。
 
 用法（仓库根目录）：
-    py -3.12 shared/tools/validate_buddies.py shared/presets
+    python shared/tools/validate_buddies.py shared/presets
 
 校验目录内所有 *.json；任一错误即该包不可运行，进程退出码非0。
 """
@@ -13,12 +13,26 @@ import re
 import sys
 from pathlib import Path
 
-SCHEMA_VERSION = 1
-DURATION_MIN_SEC = 60
-DURATION_MAX_SEC = 90
+SCHEMA_VERSIONS = {1, 2}
+DURATION_V1_MIN_SEC = 60
+DURATION_V1_MAX_SEC = 90
+DURATION_V2_MIN_SEC = 60
+DURATION_V2_MAX_SEC = 180
+PRESSURE_MIN_BOUND = 0
+PRESSURE_MAX_BOUND = 1000
 
-EVENTS = {"game.start", "touch.tap", "touch.long_press", "touch.swipe", "timer.elapsed"}
+EVENTS = {
+    "game.start", "touch.tap", "touch.long_press", "touch.swipe", "timer.elapsed",
+    "touch.swipe_left", "touch.swipe_right", "touch.swipe_up", "touch.swipe_down",
+    "touch.rapid_tap", "imu.shake",
+}
+V1_EVENTS = {"game.start", "touch.tap", "touch.long_press", "touch.swipe", "timer.elapsed"}
 ACTIONS = {
+    "avatar.expression", "avatar.motion", "audio.play",
+    "timer.start", "var.set", "var.increment", "game.end",
+    "pressure.adjust",
+}
+V1_ACTIONS = {
     "avatar.expression", "avatar.motion", "audio.play",
     "timer.start", "var.set", "var.increment", "game.end",
 }
@@ -40,18 +54,25 @@ def _is_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _utf8_codepoints(text: str) -> int:
+    return sum(1 for b in text.encode("utf-8") if (b & 0xC0) != 0x80)
+
+
 def validate_manifest(data: object) -> list[str]:
     """校验单个BuddyManifest（已解析JSON），返回错误列表；空列表=合法。"""
     errors: list[str] = []
-    if not isinstance(data, dict):
-        return ["manifest必须是JSON对象"]
 
     def err(msg: str) -> None:
         errors.append(msg)
 
+    if not isinstance(data, dict):
+        return ["manifest必须是JSON对象"]
+
     # schema_version
-    if data.get("schema_version") != SCHEMA_VERSION:
-        err(f"schema_version必须是{SCHEMA_VERSION}，实际为{data.get('schema_version')!r}")
+    schema_version = data.get("schema_version")
+    if not _is_int(schema_version) or schema_version not in SCHEMA_VERSIONS:
+        err(f"schema_version必须是1或2，实际为{schema_version!r}")
+        return errors
 
     buddy_id = data.get("buddy_id")
     if not isinstance(buddy_id, str) or not buddy_id:
@@ -95,8 +116,55 @@ def validate_manifest(data: object) -> list[str]:
         return errors
 
     duration = game.get("duration_sec")
-    if not _is_int(duration) or not DURATION_MIN_SEC <= duration <= DURATION_MAX_SEC:
-        err(f"game.duration_sec必须是{DURATION_MIN_SEC}—{DURATION_MAX_SEC}的整数")
+    if schema_version == 1:
+        if not _is_int(duration) or not DURATION_V1_MIN_SEC <= duration <= DURATION_V1_MAX_SEC:
+            err(f"duration_sec必须是{DURATION_V1_MIN_SEC}—{DURATION_V1_MAX_SEC}的整数")
+    else:
+        if duration is not None and (not _is_int(duration)
+                                     or not DURATION_V2_MIN_SEC <= duration <= DURATION_V2_MAX_SEC):
+            err(f"duration_sec在v2中可选，若提供必须是{DURATION_V2_MIN_SEC}—{DURATION_V2_MAX_SEC}的整数")
+
+    # v2 pressure / quips
+    if schema_version >= 2:
+        pressure = game.get("pressure")
+        if not isinstance(pressure, dict):
+            err("game.pressure必须是对象")
+        else:
+            p_initial = pressure.get("initial")
+            p_rise = pressure.get("rise_per_sec")
+            p_min = pressure.get("min")
+            p_max = pressure.get("max")
+            if not all(_is_int(v) for v in (p_initial, p_rise, p_min, p_max)):
+                err("pressure.initial/rise_per_sec/min/max必须都是整数")
+            else:
+                if not (PRESSURE_MIN_BOUND <= p_min < p_initial < p_max <= PRESSURE_MAX_BOUND):
+                    err("pressure必须满足0<=min<initial<max<=1000")
+                if p_rise < 1:
+                    err("pressure.rise_per_sec必须>=1")
+
+        quips = game.get("quips")
+        if not isinstance(quips, dict):
+            err("game.quips必须是对象")
+        else:
+            for key in ("escaped", "carried_away"):
+                arr = quips.get(key)
+                if not isinstance(arr, list) or not arr:
+                    err(f"game.quips.{key}必须是非空数组")
+                    continue
+                if len(arr) > 4:
+                    err(f"game.quips.{key}最多4条")
+                for item in arr:
+                    if not isinstance(item, str) or not item:
+                        err(f"game.quips.{key}条目必须是非空字符串")
+                        continue
+                    cp = _utf8_codepoints(item)
+                    if not 1 <= cp <= 40:
+                        err(f"game.quips.{key}条目必须是1—40个UTF-8字符")
+    else:
+        if "pressure" in game:
+            err("v1包不能包含game.pressure")
+        if "quips" in game:
+            err("v1包不能包含game.quips")
 
     variables = game.get("variables")
     var_names: set[str] = set()
@@ -119,6 +187,9 @@ def validate_manifest(data: object) -> list[str]:
             if not _is_int(var.get("initial")):
                 err(f"变量{name!r}的initial必须是整数")
 
+    allowed_events = V1_EVENTS if schema_version == 1 else EVENTS
+    allowed_actions = V1_ACTIONS if schema_version == 1 else ACTIONS
+
     nodes = game.get("nodes")
     node_ids: list[str] = []
     if not isinstance(nodes, list) or not nodes:
@@ -138,7 +209,7 @@ def validate_manifest(data: object) -> list[str]:
         for field in ("title", "instruction"):
             if not isinstance(node.get(field), str) or not node[field].strip():
                 err(f"节点{node_id!r}缺少非空{field}")
-        _check_actions(node.get("on_enter", []), var_names,
+        _check_actions(node.get("on_enter", []), var_names, schema_version,
                        f"节点{node_id!r}的on_enter", err)
         transitions = node.get("transitions", [])
         if not isinstance(transitions, list):
@@ -150,16 +221,18 @@ def validate_manifest(data: object) -> list[str]:
                 err(f"{where}必须是对象")
                 continue
             event = tr.get("event")
-            if event not in EVENTS:
-                err(f"{where}的事件{event!r}不在白名单{sorted(EVENTS)}内")
+            if event not in allowed_events:
+                if event in EVENTS:
+                    err(f"{where}的事件{event!r}在v1中不可用")
+                else:
+                    err(f"{where}的事件{event!r}不在白名单{sorted(allowed_events)}内")
             to = tr.get("to")
             if not isinstance(to, str) or not to:
                 err(f"{where}缺少目标节点to")
             elif to not in [n for n in node_ids]:
-                # 目标存在性在节点收集后统一检查
                 pass
-            _check_condition(tr.get("condition"), var_names, where, err)
-            _check_actions(tr.get("actions", []), var_names, where, err)
+            _check_condition(tr.get("condition"), var_names, schema_version, where, err)
+            _check_actions(tr.get("actions", []), var_names, schema_version, where, err, allowed_actions)
 
     id_set = set(node_ids)
     for node in nodes if isinstance(nodes, list) else []:
@@ -220,7 +293,6 @@ def validate_manifest(data: object) -> list[str]:
                          and any(a.get("op") == "game.end" and a.get("outcome") == "carried_away"
                                  for a in (n.get("on_enter") or [])
                                  if isinstance(a, dict))}
-        # 结局动作也可能在迁移actions里：结局节点=含game.end动作的节点或其迁移目标
         end_targets: dict[str, str] = {}
         for node in nodes:
             if not isinstance(node, dict):
@@ -238,7 +310,7 @@ def validate_manifest(data: object) -> list[str]:
             (escaped_nodes if outcome == "escaped" else carried_nodes).add(target)
         if not (escaped_nodes & reachable):
             err("从initial_node不可达任何escaped结局节点")
-        # 全局超时强制carried_away，因此图不可达carried_away时仍视为可达（默认结局）
+        # carried_away 由全局超时（v1）或压力（v2）兜底，图不可达也视为可达
 
     # resources
     resources = data.get("resources")
@@ -258,6 +330,7 @@ def validate_manifest(data: object) -> list[str]:
             elif rid in seen_ids:
                 err(f"资源id {rid!r}重复")
             else:
+                seen_ids.add(rid)
                 resource_ids.add(rid)
             if res.get("kind") != "audio":
                 err(f"{where}.kind必须是audio")
@@ -274,6 +347,8 @@ def validate_manifest(data: object) -> list[str]:
     for action in all_actions:
         if action.get("op") == "audio.play" and action.get("resource_id") not in resource_ids:
             err(f"audio.play引用未声明资源{action.get('resource_id')!r}")
+        if schema_version == 1 and action.get("op") == "pressure.adjust":
+            err("v1包不能使用pressure.adjust")
 
     return errors
 
@@ -284,46 +359,56 @@ def _check_enum(obj: dict, field: str, allowed: set[str], err) -> None:
         err(f"avatar.{field}={value!r}不在封闭枚举{sorted(allowed)}内")
 
 
-def _check_condition(cond: object, var_names: set[str], where: str, err) -> None:
+def _check_condition(cond: object, var_names: set[str], schema_version: int, where: str, err) -> None:
     if cond is None:
         return
     if not isinstance(cond, dict):
         err(f"{where}的condition必须是对象")
         return
     left = cond.get("left")
-    if isinstance(left, dict) and set(left) == {"var"}:
-        if left["var"] not in var_names:
-            err(f"{where}的condition引用了未声明变量{left['var']!r}")
-        left_type = "int"
-    elif isinstance(left, dict) and set(left) == {"remaining_sec"} and left["remaining_sec"] is True:
-        left_type = "int"
-    else:
-        err(f"{where}的condition.left只允许{{'var': name}}或{{'remaining_sec': true}}")
-        left_type = None
+    left_type = None
+    if isinstance(left, dict):
+        keys = set(left)
+        if keys == {"var"}:
+            if left["var"] not in var_names:
+                err(f"{where}的condition引用了未声明变量{left['var']!r}")
+            left_type = "int"
+        elif keys == {"remaining_sec"} and left["remaining_sec"] is True:
+            left_type = "int"
+        elif keys == {"pressure"} and left["pressure"] is True:
+            if schema_version == 1:
+                err(f"{where}的pressure条件需要schema_version 2")
+            left_type = "int"
+    if left_type is None:
+        err(f"{where}的condition.left只允许{{'var': name}}、{{'remaining_sec': true}}或{{'pressure': true}}")
     op = cond.get("op")
     if op not in COMPARE_OPS:
         err(f"{where}的condition.op {op!r}不在白名单{sorted(COMPARE_OPS)}内")
     right = cond.get("right")
-    if isinstance(right, bool) or not isinstance(right, (int, str)):
-        err(f"{where}的condition.right必须是常量")
-    elif left_type == "int" and not _is_int(right):
+    if left_type == "int" and not _is_int(right):
         err(f"{where}的condition.right类型与左侧不一致，应为整数")
 
 
-def _check_actions(actions: object, var_names: set[str], where: str, err) -> None:
+def _check_actions(actions: object, var_names: set[str], schema_version: int, where: str, err,
+                   allowed_actions: set[str] | None = None) -> None:
     if actions is None:
         return
     if not isinstance(actions, list):
         err(f"{where}的动作列表必须是数组")
         return
+    if allowed_actions is None:
+        allowed_actions = V1_ACTIONS if schema_version == 1 else ACTIONS
     for i, action in enumerate(actions):
         loc = f"{where}的动作[{i}]"
         if not isinstance(action, dict):
             err(f"{loc}必须是对象")
             continue
         op = action.get("op")
-        if op not in ACTIONS:
-            err(f"{loc}的op {op!r}不在白名单{sorted(ACTIONS)}内")
+        if op not in allowed_actions:
+            if op in ACTIONS:
+                err(f"{loc}的op {op!r}在v1中不可用")
+            else:
+                err(f"{loc}的op {op!r}不在白名单{sorted(allowed_actions)}内")
             continue
         if op == "avatar.expression" and action.get("value") not in AVATAR_EXPRESSIONS:
             err(f"{loc}的expression值{action.get('value')!r}不在封闭枚举内")
@@ -338,12 +423,15 @@ def _check_actions(actions: object, var_names: set[str], where: str, err) -> Non
         elif op in ("var.set", "var.increment"):
             if action.get("name") not in var_names:
                 err(f"{loc}引用了未声明变量{action.get('name')!r}")
-            if op == "var.set" and not _is_int(action.get("value")):
-                err(f"{loc}的value必须是整数")
-            if op == "var.increment" and not _is_int(action.get("value")):
+            if not _is_int(action.get("value")):
                 err(f"{loc}的value必须是整数")
         elif op == "game.end" and action.get("outcome") not in OUTCOMES:
             err(f"{loc}的outcome {action.get('outcome')!r}必须是escaped或carried_away")
+        elif op == "pressure.adjust":
+            if schema_version == 1:
+                err(f"{loc}的pressure.adjust需要schema_version 2")
+            if not _is_int(action.get("value")):
+                err(f"{loc}的pressure.adjust value必须是整数")
 
 
 def iter_manifest_files(root: Path) -> list[Path]:
@@ -352,7 +440,7 @@ def iter_manifest_files(root: Path) -> list[Path]:
 
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
-        print("用法: py -3.12 shared/tools/validate_buddies.py <presets目录>", file=sys.stderr)
+        print("用法: python shared/tools/validate_buddies.py <presets目录>", file=sys.stderr)
         return 2
     root = Path(argv[1])
     if not root.is_dir():

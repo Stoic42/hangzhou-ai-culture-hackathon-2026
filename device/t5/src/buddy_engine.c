@@ -1,6 +1,6 @@
 /**
  * @file buddy_engine.c
- * @brief Rule pack v1 parser/validator and single-threaded game session.
+ * @brief Rule pack v1/v2 parser/validator and single-threaded game session.
  */
 #include "buddy_engine.h"
 
@@ -9,13 +9,29 @@
 
 #include "cJSON.h"
 
-#define SCHEMA_VERSION 1
-#define DURATION_MIN_SEC 60
-#define DURATION_MAX_SEC 90
+#define SCHEMA_VERSION_MIN 1
+#define SCHEMA_VERSION_MAX 2
+#define DURATION_V1_MIN_SEC 60
+#define DURATION_V1_MAX_SEC 90
+#define DURATION_V2_MIN_SEC 60
+#define DURATION_V2_MAX_SEC 180
+#define PRESSURE_MIN_BOUND 0
+#define PRESSURE_MAX_BOUND 1000
+#define COMBO_WINDOW_MS 400
 
 static const char * const EVENT_NAMES[] = {
-    "game.start", "touch.tap", "touch.long_press", "touch.swipe", "timer.elapsed"
+    "game.start", "touch.tap", "touch.long_press", "touch.swipe", "timer.elapsed",
+    "touch.swipe_left", "touch.swipe_right", "touch.swipe_up", "touch.swipe_down",
+    "touch.rapid_tap", "imu.shake"
 };
+
+/* v1 allows indices [0 .. BUDDY_EVENT_TIMER]; v2 adds the rest. */
+#define BUDDY_EVENT_V1_COUNT (BUDDY_EVENT_TIMER + 1)
+
+static bool is_v1_event(buddy_event_t ev)
+{
+    return ev < BUDDY_EVENT_V1_COUNT;
+}
 
 static bool parse_event(const char *name, buddy_event_t *out)
 {
@@ -136,16 +152,30 @@ static bool parse_condition(const cJSON *cond, buddy_t *buddy, buddy_condition_t
     if (cJSON_IsObject(left)) {
         const cJSON *var = cJSON_GetObjectItem(left, "var");
         const cJSON *remaining = cJSON_GetObjectItem(left, "remaining_sec");
+        const cJSON *pressure = cJSON_GetObjectItem(left, "pressure");
+        int set_bits = 0;
         if (cJSON_IsString(var)) {
             out->var = buddy_find_var(buddy, var->valuestring);
             if (out->var < 0) {
                 fail(err, "condition uses undeclared variable");
                 return false;
             }
-        } else if (cJSON_IsBool(remaining) && cJSON_IsTrue(remaining)) {
+            set_bits++;
+        }
+        if (cJSON_IsBool(remaining) && cJSON_IsTrue(remaining)) {
             out->is_remaining = true;
-        } else {
-            fail(err, "condition.left must be {var} or {remaining_sec:true}");
+            set_bits++;
+        }
+        if (cJSON_IsBool(pressure) && cJSON_IsTrue(pressure)) {
+            if (buddy->schema_version < 2) {
+                fail(err, "pressure condition requires schema_version 2");
+                return false;
+            }
+            out->is_pressure = true;
+            set_bits++;
+        }
+        if (set_bits != 1) {
+            fail(err, "condition.left must be exactly one of {var}, {remaining_sec:true}, {pressure:true}");
             return false;
         }
     } else {
@@ -251,6 +281,18 @@ static bool parse_actions(const cJSON *actions, buddy_t *buddy, buddy_action_t *
                 fail(err, "game.end outcome must be escaped or carried_away");
                 return false;
             }
+        } else if (strcmp(jop->valuestring, "pressure.adjust") == 0) {
+            const cJSON *value = cJSON_GetObjectItem(action, "value");
+            if (buddy->schema_version < 2) {
+                fail(err, "pressure.adjust requires schema_version 2");
+                return false;
+            }
+            dst->op = BUDDY_OP_PRESSURE_ADJUST;
+            if (!cjson_is_int(value)) {
+                fail(err, "pressure.adjust value must be an integer");
+                return false;
+            }
+            dst->int_value = (int)value->valuedouble;
         } else {
             fail(err, "action op not in whitelist");
             return false;
@@ -283,10 +325,12 @@ bool buddy_parse(const char *json, uint32_t json_len, buddy_t *out, char *err)
     }
 
     const cJSON *schema = cJSON_GetObjectItem(root, "schema_version");
-    if (!cjson_is_int(schema) || (int)schema->valuedouble != SCHEMA_VERSION) {
-        fail(err, "schema_version must be 1");
+    if (!cjson_is_int(schema) || (int)schema->valuedouble < SCHEMA_VERSION_MIN ||
+        (int)schema->valuedouble > SCHEMA_VERSION_MAX) {
+        fail(err, "schema_version must be 1 or 2");
         goto end;
     }
+    out->schema_version = (uint8_t)(int)schema->valuedouble;
 
     const cJSON *buddy_id = cJSON_GetObjectItem(root, "buddy_id");
     if (!cJSON_IsString(buddy_id) || buddy_id->valuestring[0] == '\0') {
@@ -383,12 +427,25 @@ bool buddy_parse(const char *json, uint32_t json_len, buddy_t *out, char *err)
         goto end;
     }
     const cJSON *duration = cJSON_GetObjectItem(game, "duration_sec");
-    if (!cjson_is_int(duration) || (int)duration->valuedouble < DURATION_MIN_SEC ||
-        (int)duration->valuedouble > DURATION_MAX_SEC) {
-        fail(err, "duration_sec must be 60-90");
-        goto end;
+    if (out->schema_version == 1) {
+        if (!cjson_is_int(duration) || (int)duration->valuedouble < DURATION_V1_MIN_SEC ||
+            (int)duration->valuedouble > DURATION_V1_MAX_SEC) {
+            fail(err, "duration_sec must be 60-90");
+            goto end;
+        }
+        out->duration_sec = (int)duration->valuedouble;
+    } else {
+        if (duration != NULL) {
+            if (!cjson_is_int(duration) || (int)duration->valuedouble < DURATION_V2_MIN_SEC ||
+                (int)duration->valuedouble > DURATION_V2_MAX_SEC) {
+                fail(err, "duration_sec must be 60-180 when present");
+                goto end;
+            }
+            out->duration_sec = (int)duration->valuedouble;
+        } else {
+            out->duration_sec = 0;
+        }
     }
-    out->duration_sec = (int)duration->valuedouble;
 
     const cJSON *variables = cJSON_GetObjectItem(game, "variables");
     if (!cJSON_IsArray(variables)) {
@@ -419,6 +476,78 @@ bool buddy_parse(const char *json, uint32_t json_len, buddy_t *out, char *err)
             out->vars[out->var_count].name = name->valuestring;
             out->vars[out->var_count].initial = (int)initial->valuedouble;
             out->var_count++;
+        }
+    }
+
+    /* v2 pressure and quips */
+    if (out->schema_version >= 2) {
+        const cJSON *pressure = cJSON_GetObjectItem(game, "pressure");
+        if (!cJSON_IsObject(pressure)) {
+            fail(err, "game.pressure must be an object");
+            goto end;
+        }
+        const cJSON *p_initial = cJSON_GetObjectItem(pressure, "initial");
+        const cJSON *p_rise = cJSON_GetObjectItem(pressure, "rise_per_sec");
+        const cJSON *p_min = cJSON_GetObjectItem(pressure, "min");
+        const cJSON *p_max = cJSON_GetObjectItem(pressure, "max");
+        if (!cjson_is_int(p_initial) || !cjson_is_int(p_rise) ||
+            !cjson_is_int(p_min) || !cjson_is_int(p_max)) {
+            fail(err, "pressure fields must be integers");
+            goto end;
+        }
+        out->pressure.initial = (int)p_initial->valuedouble;
+        out->pressure.rise_per_sec = (int)p_rise->valuedouble;
+        out->pressure.min = (int)p_min->valuedouble;
+        out->pressure.max = (int)p_max->valuedouble;
+        if (out->pressure.min < PRESSURE_MIN_BOUND || out->pressure.max > PRESSURE_MAX_BOUND ||
+            !(out->pressure.min < out->pressure.initial && out->pressure.initial < out->pressure.max) ||
+            out->pressure.rise_per_sec < 1) {
+            fail(err, "pressure must satisfy 0<=min<initial<max<=1000 and rise_per_sec>=1");
+            goto end;
+        }
+
+        const cJSON *quips = cJSON_GetObjectItem(game, "quips");
+        if (!cJSON_IsObject(quips)) {
+            fail(err, "game.quips must be an object");
+            goto end;
+        }
+        const char *quip_keys[] = {"escaped", "carried_away"};
+        uint8_t *quip_counts[] = {&out->quips.escaped_count, &out->quips.carried_away_count};
+        const char **quip_slots[] = {out->quips.escaped, out->quips.carried_away};
+        for (int q = 0; q < 2; q++) {
+            const cJSON *arr = cJSON_GetObjectItem(quips, quip_keys[q]);
+            if (!cJSON_IsArray(arr)) {
+                fail(err, "game.quips must contain escaped and carried_away arrays");
+                goto end;
+            }
+            uint8_t count = 0;
+            const cJSON *item = NULL;
+            cJSON_ArrayForEach(item, arr)
+            {
+                if (!cJSON_IsString(item) || item->valuestring[0] == '\0' ||
+                    count >= BUDDY_MAX_QUIPS) {
+                    fail(err, "quips must be non-empty strings");
+                    goto end;
+                }
+                size_t len = strlen(item->valuestring);
+                /* UTF-8 codepoint count: simple skip continuation bytes */
+                size_t cp = 0;
+                for (size_t i = 0; i < len; i++) {
+                    if ((item->valuestring[i] & 0xC0) != 0x80) {
+                        cp++;
+                    }
+                }
+                if (cp < 1 || cp > 40) {
+                    fail(err, "quip must be 1-40 UTF-8 characters");
+                    goto end;
+                }
+                quip_slots[q][count++] = item->valuestring;
+            }
+            *quip_counts[q] = count;
+            if (count < 1) {
+                fail(err, "quips list must contain at least one string");
+                goto end;
+            }
         }
     }
 
@@ -475,6 +604,10 @@ bool buddy_parse(const char *json, uint32_t json_len, buddy_t *out, char *err)
                 const cJSON *condition = cJSON_GetObjectItem(tr, "condition");
                 if (!cJSON_IsString(event) || !parse_event(event->valuestring, &tdst->event)) {
                     fail(err, "transition event not in whitelist");
+                    goto end;
+                }
+                if (out->schema_version == 1 && !is_v1_event(tdst->event)) {
+                    fail(err, "transition event not allowed in schema_version 1");
                     goto end;
                 }
                 if (!cJSON_IsString(to) || to->valuestring[0] == '\0') {
@@ -605,7 +738,7 @@ bool buddy_parse(const char *json, uint32_t json_len, buddy_t *out, char *err)
             fail(err, "no escaped ending reachable from initial_node");
             goto end;
         }
-        /* carried_away is always reachable: the global timeout forces it */
+        /* carried_away is always reachable: the global timeout (v1) or pressure (v2) forces it */
     }
 
     /* resources */
@@ -682,11 +815,21 @@ void buddy_session_start(buddy_session_t *session, const buddy_t *buddy)
     session->outcome = BUDDY_OUTCOME_NONE;
     session->expression = BUDDY_EXPR_NEUTRAL;
     session->motion = BUDDY_MOTION_STILL;
+    if (buddy->schema_version >= 2) {
+        session->pressure = buddy->pressure.initial;
+    }
 }
 
 static bool condition_holds(const buddy_session_t *session, const buddy_condition_t *cond)
 {
-    int left = cond->is_remaining ? session->remaining_sec : session->var_values[cond->var];
+    int left;
+    if (cond->is_remaining) {
+        left = session->remaining_sec;
+    } else if (cond->is_pressure) {
+        left = session->pressure;
+    } else {
+        left = session->var_values[cond->var];
+    }
     switch (cond->op) {
     case BUDDY_CMP_EQ:
         return left == cond->right;
@@ -733,6 +876,14 @@ static void run_actions(buddy_session_t *session, const buddy_action_t *actions,
         case BUDDY_OP_GAME_END:
             session->outcome = action->outcome;
             break;
+        case BUDDY_OP_PRESSURE_ADJUST:
+            session->pressure += action->int_value;
+            if (action->int_value > 0) {
+                session->mistakes++;
+            } else if (action->int_value < 0) {
+                session->relieves++;
+            }
+            break;
         default:
             break;
         }
@@ -746,16 +897,17 @@ static void enter_node(buddy_session_t *session, int8_t node_index, const buddy_
     run_actions(session, node->on_enter, node->on_enter_count, ops);
 }
 
-static void force_ending(buddy_session_t *session, const buddy_session_ops_t *ops)
+static void enter_outcome_node(buddy_session_t *session, buddy_outcome_t outcome,
+                               const buddy_session_ops_t *ops)
 {
-    /* global countdown exhausted: default carried_away, rules cannot override */
+    /* find a node that hosts this outcome and enter it; fallback to raw outcome */
     for (int i = 0; i < session->buddy->node_count; i++) {
         const buddy_node_t *node = &session->buddy->nodes[i];
         for (int j = 0; j < node->on_enter_count; j++) {
             if (node->on_enter[j].op == BUDDY_OP_GAME_END &&
-                node->on_enter[j].outcome == BUDDY_OUTCOME_CARRIED_AWAY) {
+                node->on_enter[j].outcome == outcome) {
                 enter_node(session, (int8_t)i, ops);
-                session->outcome = BUDDY_OUTCOME_CARRIED_AWAY;
+                session->outcome = outcome;
                 return;
             }
         }
@@ -763,41 +915,42 @@ static void force_ending(buddy_session_t *session, const buddy_session_ops_t *op
             const buddy_transition_t *tr = &node->transitions[j];
             for (int k = 0; k < tr->action_count; k++) {
                 if (tr->actions[k].op == BUDDY_OP_GAME_END &&
-                    tr->actions[k].outcome == BUDDY_OUTCOME_CARRIED_AWAY) {
+                    tr->actions[k].outcome == outcome) {
                     enter_node(session, tr->to, ops);
-                    session->outcome = BUDDY_OUTCOME_CARRIED_AWAY;
+                    session->outcome = outcome;
                     return;
                 }
             }
         }
     }
-    /* no dedicated carried_away node: keep current node with forced outcome */
-    session->outcome = BUDDY_OUTCOME_CARRIED_AWAY;
+    /* no dedicated outcome node: keep current node with forced outcome */
+    session->outcome = outcome;
 }
 
-bool buddy_session_handle(buddy_session_t *session, buddy_event_t event,
-                          const buddy_session_ops_t *ops)
+static void check_auto_ending(buddy_session_t *session, const buddy_session_ops_t *ops)
 {
     if (session->outcome != BUDDY_OUTCOME_NONE) {
-        return false;
+        return;
     }
-
-    if (event == BUDDY_EVENT_GAME_START) {
-        /* explicit start: run the initial node's on_enter (audio, expression) */
-        enter_node(session, session->buddy->initial_node, ops);
-        return true;
-    }
-
-    if (event == BUDDY_EVENT_TIMER) {
-        if (session->remaining_sec > 0) {
-            session->remaining_sec--;
+    const buddy_t *buddy = session->buddy;
+    if (buddy->schema_version >= 2) {
+        if (session->pressure >= buddy->pressure.max) {
+            enter_outcome_node(session, BUDDY_OUTCOME_CARRIED_AWAY, ops);
+            return;
         }
-        if (session->remaining_sec <= 0) {
-            force_ending(session, ops);
-            return true;
+        if (session->pressure <= buddy->pressure.min) {
+            enter_outcome_node(session, BUDDY_OUTCOME_ESCAPED, ops);
+            return;
         }
     }
+    if (buddy->duration_sec > 0 && session->remaining_sec <= 0) {
+        enter_outcome_node(session, BUDDY_OUTCOME_CARRIED_AWAY, ops);
+    }
+}
 
+static bool try_match_event(buddy_session_t *session, buddy_event_t event,
+                            const buddy_session_ops_t *ops)
+{
     const buddy_node_t *node = &session->buddy->nodes[session->current_node];
     for (int i = 0; i < node->transition_count; i++) {
         const buddy_transition_t *tr = &node->transitions[i];
@@ -815,4 +968,80 @@ bool buddy_session_handle(buddy_session_t *session, buddy_event_t event,
         return true;
     }
     return false;
+}
+
+static bool is_directional_swipe(buddy_event_t event)
+{
+    return event == BUDDY_EVENT_SWIPE_LEFT || event == BUDDY_EVENT_SWIPE_RIGHT ||
+           event == BUDDY_EVENT_SWIPE_UP || event == BUDDY_EVENT_SWIPE_DOWN;
+}
+
+bool buddy_session_handle_ex(buddy_session_t *session, buddy_event_t event,
+                             const buddy_session_ops_t *ops, uint32_t now_ms)
+{
+    if (session->outcome != BUDDY_OUTCOME_NONE) {
+        return false;
+    }
+
+    if (event == BUDDY_EVENT_GAME_START) {
+        /* explicit start: run the initial node's on_enter (audio, expression) */
+        enter_node(session, session->buddy->initial_node, ops);
+        check_auto_ending(session, ops);
+        return true;
+    }
+
+    if (event == BUDDY_EVENT_TIMER) {
+        session->elapsed_sec++;
+        if (session->buddy->schema_version >= 2) {
+            session->pressure += session->buddy->pressure.rise_per_sec;
+        }
+        if (session->buddy->duration_sec > 0 && session->remaining_sec > 0) {
+            session->remaining_sec--;
+        }
+        check_auto_ending(session, ops);
+        return true;
+    }
+
+    /* combo tracking for taps */
+    if (event == BUDDY_EVENT_TAP && now_ms > 0) {
+        if (session->last_tap_ms == 0 || (now_ms - session->last_tap_ms) > COMBO_WINDOW_MS) {
+            session->combo_count = 1;
+        } else {
+            session->combo_count++;
+        }
+        session->last_tap_ms = now_ms;
+        if (session->combo_count > session->combo_peak) {
+            session->combo_peak = session->combo_count;
+        }
+    }
+
+    bool handled = try_match_event(session, event, ops);
+    if (handled) {
+        check_auto_ending(session, ops);
+    }
+
+    /* rapid_tap follows a successful combo tap */
+    if (event == BUDDY_EVENT_TAP && now_ms > 0 && session->combo_count >= 2 &&
+        session->outcome == BUDDY_OUTCOME_NONE) {
+        if (try_match_event(session, BUDDY_EVENT_RAPID_TAP, ops)) {
+            check_auto_ending(session, ops);
+            handled = true;
+        }
+    }
+
+    /* directional swipe falls back to generic swipe if no direction transition matched */
+    if (!handled && is_directional_swipe(event) && session->outcome == BUDDY_OUTCOME_NONE) {
+        if (try_match_event(session, BUDDY_EVENT_SWIPE, ops)) {
+            check_auto_ending(session, ops);
+            handled = true;
+        }
+    }
+
+    return handled;
+}
+
+bool buddy_session_handle(buddy_session_t *session, buddy_event_t event,
+                          const buddy_session_ops_t *ops)
+{
+    return buddy_session_handle_ex(session, event, ops, 0);
 }

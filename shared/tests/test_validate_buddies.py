@@ -1,7 +1,7 @@
-"""规则包v1校验器测试。
+"""规则包v1/v2校验器测试。
 
 运行（仓库根目录）：
-    py -3.12 -m unittest discover -s shared/tests -v
+    python -m unittest discover -s shared/tests -v
 """
 
 from __future__ import annotations
@@ -24,6 +24,74 @@ def load(name: str) -> dict:
     return json.loads((PRESETS_DIR / name).read_text(encoding="utf-8"))
 
 
+def make_v2_minimal() -> dict:
+    """返回一个可通过校验的最小v2规则包（swipe_duel模板简化版）。"""
+    return {
+        "schema_version": 2,
+        "buddy_id": "bdy_test_v2",
+        "content_hash": "0" * 64,
+        "content": {
+            "name": "测试妖怪",
+            "personality": "测试性格",
+            "gameplay_summary": "测试玩法",
+            "theme_tags": ["测试"],
+        },
+        "avatar": {
+            "face": "round",
+            "eyes": "sleepy",
+            "mouth": "small",
+            "palette": ["#18243A", "#FFD166"],
+            "motion_style": "drowsy",
+        },
+        "game": {
+            "initial_node": "start",
+            "variables": [{"name": "pushes", "type": "int", "initial": 0}],
+            "pressure": {"initial": 50, "rise_per_sec": 3, "min": 0, "max": 100},
+            "quips": {
+                "escaped": ["你赢了"],
+                "carried_away": ["你输了"],
+            },
+            "nodes": [
+                {
+                    "id": "start",
+                    "title": "开始",
+                    "instruction": "向左滑",
+                    "transitions": [
+                        {
+                            "event": "touch.swipe_left",
+                            "to": "start",
+                            "actions": [
+                                {"op": "var.increment", "name": "pushes", "value": 1},
+                                {"op": "pressure.adjust", "value": -20},
+                            ],
+                        },
+                        {
+                            "event": "touch.swipe",
+                            "to": "start",
+                            "actions": [
+                                {"op": "pressure.adjust", "value": 10},
+                            ],
+                        },
+                        {
+                            "event": "touch.tap",
+                            "to": "start",
+                            "condition": {"left": {"pressure": True}, "op": "lte", "right": 10},
+                            "actions": [{"op": "game.end", "outcome": "escaped"}],
+                        },
+                    ],
+                },
+                {
+                    "id": "carried_node",
+                    "title": "被带跑",
+                    "instruction": "失败",
+                    "on_enter": [{"op": "game.end", "outcome": "carried_away"}],
+                },
+            ],
+        },
+        "resources": [],
+    }
+
+
 class PresetsValidTest(unittest.TestCase):
     def test_all_presets_pass(self):
         for path in vb.iter_manifest_files(PRESETS_DIR):
@@ -34,6 +102,24 @@ class PresetsValidTest(unittest.TestCase):
     def test_preset_files_exist(self):
         names = {p.name for p in vb.iter_manifest_files(PRESETS_DIR)}
         self.assertEqual(names, {"last-one.json", "do-now.json", "decide-now.json"})
+
+
+class V2ValidTest(unittest.TestCase):
+    def test_minimal_v2_passes(self):
+        errors = vb.validate_manifest(make_v2_minimal())
+        self.assertEqual(errors, [])
+
+    def test_v2_duration_optional(self):
+        data = make_v2_minimal()
+        # minimal fixture already omits duration_sec
+        errors = vb.validate_manifest(data)
+        self.assertEqual(errors, [])
+
+    def test_v2_duration_180_ok(self):
+        data = make_v2_minimal()
+        data["game"]["duration_sec"] = 180
+        errors = vb.validate_manifest(data)
+        self.assertEqual(errors, [])
 
 
 class NegativeCasesTest(unittest.TestCase):
@@ -49,7 +135,7 @@ class NegativeCasesTest(unittest.TestCase):
                         f"错误中应包含{fragment!r}，实际: {errors}")
 
     def test_bad_schema_version(self):
-        self.check(lambda d: d.update(schema_version=2), "schema_version")
+        self.check(lambda d: d.update(schema_version=3), "schema_version")
 
     def test_bad_duration_too_short(self):
         self.check(lambda d: d["game"].update(duration_sec=59), "duration_sec")
@@ -137,6 +223,94 @@ class NegativeCasesTest(unittest.TestCase):
 
     def test_missing_content_field(self):
         self.check(lambda d: d["content"].pop("personality"), "personality")
+
+
+class V2NegativeCasesTest(unittest.TestCase):
+    def setUp(self):
+        self.base = make_v2_minimal()
+
+    def check(self, mutate, fragment: str):
+        data = copy.deepcopy(self.base)
+        mutate(data)
+        errors = vb.validate_manifest(data)
+        self.assertTrue(errors, f"应报错: {fragment}")
+        self.assertTrue(any(fragment in e for e in errors),
+                        f"错误中应包含{fragment!r}，实际: {errors}")
+
+    def test_v1_cannot_use_v2_event(self):
+        def mutate(d):
+            d["schema_version"] = 1
+            d["game"]["nodes"][0]["transitions"][0]["event"] = "touch.swipe_left"
+        self.check(mutate, "v1")
+
+    def test_v1_cannot_use_pressure_adjust(self):
+        def mutate(d):
+            d["schema_version"] = 1
+            d["game"]["nodes"][0]["transitions"][0]["actions"] = [
+                {"op": "pressure.adjust", "value": 10}]
+        self.check(mutate, "pressure.adjust")
+
+    def test_v1_cannot_use_pressure_condition(self):
+        def mutate(d):
+            d["schema_version"] = 1
+            d["game"]["nodes"][0]["transitions"][2]["condition"] = {
+                "left": {"pressure": True}, "op": "lte", "right": 10}
+        self.check(mutate, "schema_version 2")
+
+    def test_missing_pressure(self):
+        def mutate(d):
+            del d["game"]["pressure"]
+        self.check(mutate, "pressure")
+
+    def test_missing_quips(self):
+        def mutate(d):
+            del d["game"]["quips"]
+        self.check(mutate, "quips")
+
+    def test_pressure_min_equals_initial(self):
+        def mutate(d):
+            d["game"]["pressure"]["min"] = 50
+        self.check(mutate, "0<=min")
+
+    def test_pressure_initial_equals_max(self):
+        def mutate(d):
+            d["game"]["pressure"]["initial"] = 100
+        self.check(mutate, "initial<max")
+
+    def test_pressure_out_of_bounds(self):
+        def mutate(d):
+            d["game"]["pressure"]["max"] = 1001
+        self.check(mutate, "1000")
+
+    def test_pressure_rise_zero(self):
+        def mutate(d):
+            d["game"]["pressure"]["rise_per_sec"] = 0
+        self.check(mutate, "rise_per_sec")
+
+    def test_quips_empty_side(self):
+        def mutate(d):
+            d["game"]["quips"]["escaped"] = []
+        self.check(mutate, "非空")
+
+    def test_quips_too_long(self):
+        def mutate(d):
+            d["game"]["quips"]["escaped"] = ["啊" * 41]
+        self.check(mutate, "1—40")
+
+    def test_quips_missing_side(self):
+        def mutate(d):
+            del d["game"]["quips"]["carried_away"]
+        self.check(mutate, "carried_away")
+
+    def test_v2_duration_too_short(self):
+        def mutate(d):
+            d["game"]["duration_sec"] = 59
+        self.check(mutate, "duration_sec")
+
+    def test_v2_duration_too_long(self):
+        def mutate(d):
+            d["game"]["duration_sec"] = 181
+        self.check(mutate, "duration_sec")
 
 
 if __name__ == "__main__":

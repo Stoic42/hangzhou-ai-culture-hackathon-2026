@@ -1,9 +1,9 @@
 /**
  * @file buddy_engine.h
- * @brief Rule pack v1 (BuddyManifest) parser, validator and game session.
+ * @brief Rule pack v1/v2 (BuddyManifest) parser, validator and game session.
  *
  * Mirrors shared/tools/validate_buddies.py: closed whitelists for events,
- * actions and enums; duration 60-90s; both outcomes; graph reachability.
+ * actions and enums; v1 duration 60-90s, v2 pressure-based endings.
  * A session is a plain single-threaded state machine; no dynamic code.
  */
 #ifndef BUDDY_ENGINE_H
@@ -23,6 +23,7 @@ extern "C" {
 #define BUDDY_MAX_RESOURCES 4
 #define BUDDY_MAX_TAGS 4
 #define BUDDY_MAX_PALETTE 4
+#define BUDDY_MAX_QUIPS 4
 #define BUDDY_ERR_LEN 96
 
 typedef enum {
@@ -31,6 +32,13 @@ typedef enum {
     BUDDY_EVENT_LONG_PRESS,
     BUDDY_EVENT_SWIPE,
     BUDDY_EVENT_TIMER,
+    /* v2 events */
+    BUDDY_EVENT_SWIPE_LEFT,
+    BUDDY_EVENT_SWIPE_RIGHT,
+    BUDDY_EVENT_SWIPE_UP,
+    BUDDY_EVENT_SWIPE_DOWN,
+    BUDDY_EVENT_RAPID_TAP,
+    BUDDY_EVENT_SHAKE,
     BUDDY_EVENT_COUNT
 } buddy_event_t;
 
@@ -42,6 +50,8 @@ typedef enum {
     BUDDY_OP_VAR_SET,
     BUDDY_OP_VAR_INCREMENT,
     BUDDY_OP_GAME_END,
+    /* v2 action */
+    BUDDY_OP_PRESSURE_ADJUST,
     BUDDY_OP_COUNT
 } buddy_op_t;
 
@@ -72,7 +82,8 @@ typedef enum { BUDDY_MOTION_STILL = 0, BUDDY_MOTION_BREATHE, BUDDY_MOTION_SHAKE,
 
 typedef struct {
     bool is_remaining;      /**< left is remaining_sec instead of a variable */
-    int8_t var;             /**< variable index, -1 when is_remaining */
+    bool is_pressure;       /**< left is session pressure (v2 only) */
+    int8_t var;             /**< variable index, -1 when is_remaining or is_pressure */
     buddy_cmp_t op;
     int right;              /**< integer constant */
 } buddy_condition_t;
@@ -82,7 +93,7 @@ typedef struct {
     buddy_expression_t expr;    /**< BUDDY_OP_EXPRESSION */
     buddy_motion_t motion;      /**< BUDDY_OP_MOTION */
     int8_t var;                 /**< BUDDY_OP_VAR_SET / BUDDY_OP_VAR_INCREMENT */
-    int int_value;              /**< BUDDY_OP_VAR_SET / BUDDY_OP_VAR_INCREMENT value, or timer seconds */
+    int int_value;              /**< BUDDY_OP_VAR_SET / BUDDY_OP_VAR_INCREMENT value, timer seconds, or pressure delta */
     buddy_outcome_t outcome;    /**< BUDDY_OP_GAME_END */
     const char *resource_id;    /**< BUDDY_OP_AUDIO_PLAY (points into cJSON tree) */
 } buddy_action_t;
@@ -129,13 +140,26 @@ typedef struct {
     uint32_t palette[BUDDY_MAX_PALETTE];   /**< 0xRRGGBB */
     uint8_t palette_count;
     /* game */
-    int duration_sec;
+    uint8_t schema_version;
+    int duration_sec;       /**< v1 required; v2 optional fallback ceiling (0 = none) */
     int8_t initial_node;
     struct {
         const char *name;
         int initial;
     } vars[BUDDY_MAX_VARS];
     uint8_t var_count;
+    struct {
+        int initial;
+        int rise_per_sec;
+        int min;
+        int max;
+    } pressure;             /**< v2 only */
+    struct {
+        const char *escaped[BUDDY_MAX_QUIPS];
+        uint8_t escaped_count;
+        const char *carried_away[BUDDY_MAX_QUIPS];
+        uint8_t carried_away_count;
+    } quips;                /**< v2 only */
     buddy_node_t nodes[BUDDY_MAX_NODES];
     uint8_t node_count;
     buddy_resource_t resources[BUDDY_MAX_RESOURCES];
@@ -159,9 +183,18 @@ typedef struct {
     int8_t current_node;
     int var_values[BUDDY_MAX_VARS];
     int remaining_sec;
+    int pressure;           /**< v2 runtime pressure */
     buddy_outcome_t outcome;        /**< BUDDY_OUTCOME_NONE while playing */
     buddy_expression_t expression;
     buddy_motion_t motion;
+    /* v2 session statistics */
+    uint32_t elapsed_sec;
+    uint8_t combo_peak;
+    uint16_t mistakes;
+    uint16_t relieves;
+    /* combo state (internal) */
+    uint32_t last_tap_ms;
+    uint8_t combo_count;
 } buddy_session_t;
 
 typedef struct {
@@ -175,10 +208,14 @@ typedef struct {
 /** Create a fresh session at the initial node. */
 void buddy_session_start(buddy_session_t *session, const buddy_t *buddy);
 
-/** Feed an event (tap/long_press/swipe/timer tick). Timer events are handled
+/** Feed an event with a millisecond tick. Timer events are handled
  * before touch events by the caller. When the global countdown reaches 0 the
  * session is forced into the carried_away ending regardless of rules.
  * Returns true when the node changed or the session ended. */
+bool buddy_session_handle_ex(buddy_session_t *session, buddy_event_t event,
+                             const buddy_session_ops_t *ops, uint32_t now_ms);
+
+/** Backwards-compatible wrapper: no combo timing (rapid_tap will not fire). */
 bool buddy_session_handle(buddy_session_t *session, buddy_event_t event,
                           const buddy_session_ops_t *ops);
 

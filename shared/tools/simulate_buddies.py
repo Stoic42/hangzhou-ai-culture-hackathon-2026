@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Rule-level simulator for preset buddy packs (schema_version 1).
+"""Rule-level simulator for preset buddy packs (schema_version 1 and 2).
 
 Pure-stdlib host-behaviour simulation of the shared game script:
-game.start, touch events (tap / long_press / swipe), transition conditions,
-var.set / var.increment, avatar actions (ignored), audio.play existence
-checks, game.end outcomes, and the global timeout carried_away.
+game.start, touch events (tap / long_press / swipe / directional swipes /
+rapid_tap / shake), transition conditions, var.set / var.increment,
+avatar actions (ignored), audio.play existence checks, game.end outcomes,
+pressure erosion/relief, combo timing, and the global timeout (v1) /
+fallback timeout (v2).
 
 This proves the semantics of the shared rule scripts only; it does NOT
 exercise any C runtime.
@@ -17,7 +19,17 @@ import sys
 TAP = "touch.tap"
 LONG_PRESS = "touch.long_press"
 SWIPE = "touch.swipe"
+SWIPE_LEFT = "touch.swipe_left"
+SWIPE_RIGHT = "touch.swipe_right"
+SWIPE_UP = "touch.swipe_up"
+SWIPE_DOWN = "touch.swipe_down"
+RAPID_TAP = "touch.rapid_tap"
+SHAKE = "imu.shake"
 TIMER_ELAPSED = "timer.elapsed"
+
+DIRECTIONAL_SWIPES = {SWIPE_LEFT, SWIPE_RIGHT, SWIPE_UP, SWIPE_DOWN}
+TOUCH_EVENTS = {TAP, LONG_PRESS, SWIPE, RAPID_TAP} | DIRECTIONAL_SWIPES
+ALL_EVENTS = TOUCH_EVENTS | {SHAKE, TIMER_ELAPSED}
 
 OPS_EQ = {
     "eq": lambda l, r: l == r,
@@ -27,6 +39,8 @@ OPS_EQ = {
     "lt": lambda l, r: l < r,
     "lte": lambda l, r: l <= r,
 }
+
+COMBO_WINDOW_MS = 400
 
 
 class SimulationError(Exception):
@@ -41,20 +55,32 @@ class BuddyGame:
         game = preset.get("game", {})
         self.nodes = {n["id"]: n for n in game.get("nodes", [])}
         self.initial_node = game["initial_node"]
-        self.duration_sec = game["duration_sec"]
+        self.schema_version = preset.get("schema_version", 1)
+        self.duration_sec = game.get("duration_sec", 0)
         self.variables_def = game.get("variables", [])
         self.resources = {
             r["resource_id"] for r in preset.get("resources", [])
         }
+        if self.schema_version >= 2:
+            self.pressure_cfg = game["pressure"]
+        else:
+            self.pressure_cfg = None
         self.reset()
 
     def reset(self):
-        """Restart: reset variables, initial node, countdown and outcome."""
+        """Restart: reset variables, initial node, countdown, pressure and outcome."""
         self.vars = {v["name"]: v["initial"] for v in self.variables_def}
         self.node_id = self.initial_node
         self.elapsed = 0.0
+        self.elapsed_sec = 0
         self.ended = False
         self.outcome = None
+        self.pressure = self.pressure_cfg["initial"] if self.pressure_cfg else 0
+        self.combo_peak = 0
+        self.combo_count = 0
+        self.last_tap_ms = 0
+        self.mistakes = 0
+        self.relieves = 0
         self._run_on_enter(self.node_id)
 
     # ---- helpers -------------------------------------------------------
@@ -66,13 +92,25 @@ class BuddyGame:
             return self.vars[spec["var"]]
         return spec
 
+    def _eval_left(self, left):
+        if isinstance(left, dict) and left.get("remaining_sec") is True:
+            return self.remaining_sec()
+        if isinstance(left, dict) and left.get("pressure") is True:
+            return self.pressure
+        return self._eval_value(left)
+
+    def remaining_sec(self):
+        if self.duration_sec <= 0:
+            return 0
+        return max(0, self.duration_sec - int(self.elapsed))
+
     def _check_condition(self, cond):
         if cond is None:
             return True
         op = cond["op"]
         if op not in OPS_EQ:
             raise SimulationError("unknown condition op: %r" % op)
-        return OPS_EQ[op](self._eval_value(cond["left"]),
+        return OPS_EQ[op](self._eval_left(cond["left"]),
                           self._eval_value(cond["right"]))
 
     def _run_actions(self, actions):
@@ -92,19 +130,36 @@ class BuddyGame:
             elif op == "game.end":
                 self.ended = True
                 self.outcome = action["outcome"]
+            elif op == "pressure.adjust":
+                self.pressure += action["value"]
+                if action["value"] > 0:
+                    self.mistakes += 1
+                elif action["value"] < 0:
+                    self.relieves += 1
             else:
                 raise SimulationError("unknown action op: %r" % op)
 
     def _run_on_enter(self, node_id):
         self._run_actions(self.nodes[node_id].get("on_enter", []))
 
-    # ---- public API ----------------------------------------------------
-    def dispatch(self, event):
-        """Feed one touch event; returns (node_id, outcome_or_None)."""
-        if self.ended:
-            raise SimulationError("game already ended (%s)" % self.outcome)
-        if event not in (TAP, LONG_PRESS, SWIPE):
-            raise SimulationError("unknown event: %r" % event)
+    def _check_pressure(self):
+        if self.schema_version < 2 or self.ended:
+            return
+        if self.pressure >= self.pressure_cfg["max"]:
+            self._enter_outcome_node("carried_away")
+        elif self.pressure <= self.pressure_cfg["min"]:
+            self._enter_outcome_node("escaped")
+
+    def _enter_outcome_node(self, outcome):
+        for node_id, node in self.nodes.items():
+            if any(a.get("op") == "game.end" and a.get("outcome") == outcome
+                   for a in node.get("on_enter", [])):
+                self.node_id = node_id
+                break
+        self.ended = True
+        self.outcome = outcome
+
+    def _try_match(self, event):
         for tr in self._node().get("transitions", []):
             if tr["event"] != event:
                 continue
@@ -113,42 +168,86 @@ class BuddyGame:
             self._run_actions(tr.get("actions", []))
             self.node_id = tr["to"]
             self._run_on_enter(self.node_id)
-            return self.node_id, self.outcome
-        # no matching transition: stay in place
-        return self.node_id, self.outcome
+            return True
+        return False
 
-    def advance(self, seconds):
-        """Advance the global countdown; fires timer.elapsed at duration."""
+    # ---- public API ----------------------------------------------------
+    def dispatch(self, event, now_ms=0):
+        """Feed one event; returns (node_id, outcome_or_None).
+        now_ms is required for rapid_tap timing."""
         if self.ended:
+            raise SimulationError("game already ended (%s)" % self.outcome)
+        if event not in ALL_EVENTS:
+            raise SimulationError("unknown event: %r" % event)
+
+        if event == TIMER_ELAPSED:
+            self.elapsed += 1
+            self.elapsed_sec = int(self.elapsed)
+            if self.schema_version >= 2:
+                self.pressure += self.pressure_cfg["rise_per_sec"]
+            self._check_pressure()
+            if not self.ended and self.duration_sec > 0 and self.elapsed >= self.duration_sec:
+                self._enter_outcome_node("carried_away")
             return self.node_id, self.outcome
-        self.elapsed += seconds
-        if self.elapsed >= self.duration_sec:
-            for node_id, node in self.nodes.items():
-                if any(a.get("op") == "game.end" and a.get("outcome") == "carried_away"
-                       for a in node.get("on_enter", [])):
-                    self.node_id = node_id
-                    break
-            self.ended = True
-            self.outcome = "carried_away"
+
+        # combo tracking for taps
+        if event == TAP and now_ms > 0:
+            if self.last_tap_ms == 0 or (now_ms - self.last_tap_ms) > COMBO_WINDOW_MS:
+                self.combo_count = 1
+            else:
+                self.combo_count += 1
+            self.last_tap_ms = now_ms
+            if self.combo_count > self.combo_peak:
+                self.combo_peak = self.combo_count
+
+        handled = self._try_match(event)
+        if handled:
+            self._check_pressure()
+
+        if event == TAP and now_ms > 0 and self.combo_count >= 2 and not self.ended:
+            if self._try_match(RAPID_TAP):
+                self._check_pressure()
+                handled = True
+
+        if not handled and event in DIRECTIONAL_SWIPES and not self.ended:
+            if self._try_match(SWIPE):
+                self._check_pressure()
+                handled = True
+
         return self.node_id, self.outcome
 
     def timeout(self):
-        return self.advance(self.duration_sec)
+        if self.duration_sec <= 0:
+            # v2 without fallback ceiling: just advance one tick to let pressure erode
+            return self.dispatch(TIMER_ELAPSED)
+        while not self.ended and self.elapsed < self.duration_sec:
+            self.dispatch(TIMER_ELAPSED)
+        return self.node_id, self.outcome
+
+    def advance(self, seconds):
+        for _ in range(int(seconds)):
+            if self.ended:
+                break
+            self.dispatch(TIMER_ELAPSED)
+        return self.node_id, self.outcome
 
 
 # ---- per-preset verification scripts -------------------------------------
 
 def run_script(game, steps, expect_outcome, via_timeout=False):
-    """steps: list of touch events ('tap'/'long_press'/'swipe').
+    """steps: list of (event, now_ms?) tuples or plain event strings.
     Returns (ok, detail)."""
-    for ev in steps:
-        game.dispatch(ev)
+    for item in steps:
+        if isinstance(item, tuple):
+            game.dispatch(*item)
+        else:
+            game.dispatch(item)
     if via_timeout:
         game.timeout()
     if game.outcome != expect_outcome:
-        return False, "expected outcome %r, got %r (node=%r, vars=%r)" % (
-            expect_outcome, game.outcome, game.node_id, game.vars)
-    return True, "node=%r vars=%r" % (game.node_id, game.vars)
+        return False, "expected outcome %r, got %r (node=%r, vars=%r, pressure=%r)" % (
+            expect_outcome, game.outcome, game.node_id, game.vars, game.pressure)
+    return True, "node=%r vars=%r pressure=%r" % (game.node_id, game.vars, game.pressure)
 
 
 def check_last_one(preset):
